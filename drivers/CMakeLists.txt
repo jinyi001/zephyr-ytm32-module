@@ -1,1 +1,1 @@
-add_subdirectory(serial)
+add_subdirectory_ifdef(CONFIG_SERIAL serial)
