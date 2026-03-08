@@ -1,0 +1,1 @@
+add_subdirectory(${ZEPHYR_CURRENT_MODULE_DIR}/drivers drivers)

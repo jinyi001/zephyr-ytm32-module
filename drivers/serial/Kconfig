@@ -1,0 +1,6 @@
+config UART_YTM32
+    bool "YTMicro YTM32 UART driver"
+    default y
+    depends on SERIAL
+    select SERIAL_HAS_DRIVER
+    select SERIAL_SUPPORT_INTERRUPT
