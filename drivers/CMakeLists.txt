@@ -1,1 +1,2 @@
 add_subdirectory_ifdef(CONFIG_SERIAL serial)
+add_subdirectory(interrupt_controller)
