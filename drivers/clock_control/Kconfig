@@ -1,0 +1,9 @@
+# Copyright (c) 2026 YI JIN <jinyi_2001@foxmail.com>
+# SPDX-License-Identifier: Apache-2.0
+
+config CLOCK_CONTROL_YTM32
+	bool "YTMICRO YTM32 Clock Control driver"
+	default y
+	depends on DT_HAS_YTMICRO_YTM32_CGU_ENABLED
+	help
+	  Enable support for YTM32 Clock Controller (CGU).

@@ -1,1 +1,2 @@
 rsource "serial/Kconfig"
+rsource "clock_control/Kconfig"

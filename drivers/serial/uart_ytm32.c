@@ -1,6 +1,8 @@
 #define DT_DRV_COMPAT ytmicro_ytm32_uart
 
 #include <zephyr/drivers/uart.h>
+#include <zephyr/device.h>
+#include <zephyr/drivers/clock_control.h>
 #include <errno.h>
 
 /* 规避 Zephyr API 和厂商 HAL API 对 uart_callback_t 命名的冲突 */
@@ -12,6 +14,8 @@
 struct uart_ytm32_config {
     uint32_t base;
     uint32_t baud_rate;
+    const struct device *clock_dev;
+    clock_control_subsys_t clock_subsys;
 };
 
 struct uart_ytm32_data {
@@ -66,7 +70,14 @@ static int uart_ytm32_init(const struct device *dev)
     uart_user_config_t hal_config;
 
     /* 1. 开启 UART 设备时钟 */
-    /* 注：如果是 MVP，时钟已在 soc_init 开启，这里直接使用即可 */
+    if (!device_is_ready(config->clock_dev)) {
+        return -ENODEV;
+    }
+    
+    int ret = clock_control_on(config->clock_dev, config->clock_subsys);
+    if (ret < 0) {
+        return ret;
+    }
 
     /* 2. 调用厂商 HAL 进行 UART 初始化 */
     UART_DRV_GetDefaultConfig(&hal_config);
@@ -90,6 +101,8 @@ static int uart_ytm32_init(const struct device *dev)
     static const struct uart_ytm32_config uart_ytm32_config_##n = {          \
         .base = DT_INST_REG_ADDR(n),                                         \
         .baud_rate = DT_INST_PROP(n, current_speed),                         \
+        .clock_dev = DEVICE_DT_GET(DT_INST_CLOCKS_CTLR(n)),                  \
+        .clock_subsys = (clock_control_subsys_t)DT_INST_CLOCKS_CELL(n, id),  \
     };                                                                       \
     DEVICE_DT_INST_DEFINE(n, &uart_ytm32_init, NULL, &uart_ytm32_data_##n,   \
                           &uart_ytm32_config_##n, PRE_KERNEL_1,              \

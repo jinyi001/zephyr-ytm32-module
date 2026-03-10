@@ -8,14 +8,7 @@
 #include "pins_driver.h"
 #include "clock.h"
 
-static const peripheral_clock_config_t clock_config0PeripheralClockConfig[1] = {
-    {
-        .clkName = UART1_CLK,
-        .clkGate = true,
-        .divider = DIV_BY_1,
-        .clkSrc = CLK_SRC_FXOSC,
-    },
-};
+/* Removed hardcoded peripheral clock initialization */
 
 static const scu_config_t clock_config0ScuConfig = {
     .fircEnable = true,
@@ -64,8 +57,8 @@ static const clock_manager_user_config_t clock_config0ClockManager = {
     .cmuConfigPtr = &clock_config0CmuConfig,
     .ipcConfig =
         {
-            .peripheralClocks = clock_config0PeripheralClockConfig,
-            .count = 1,
+            .peripheralClocks = NULL,
+            .count = 0,
         },
 };
 
