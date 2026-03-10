@@ -1,0 +1,18 @@
+description: YTMicro YTM32 UART
+compatible: "ytmicro,ytm32-uart"
+include: [uart-controller.yaml, pinctrl-device.yaml]
+
+properties:
+  reg:
+    required: true
+  interrupts:
+    required: true
+  pinctrl-0:
+    type: phandles
+    required: false
+  pinctrl-names:
+    type: string-array
+    required: false
+  current-speed:
+    type: int
+    description: Initial baud rate setting for UART

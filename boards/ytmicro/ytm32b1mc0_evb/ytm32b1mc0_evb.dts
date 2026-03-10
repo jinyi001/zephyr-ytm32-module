@@ -1,0 +1,24 @@
+/*
+ * Copyright (c) 2026 YI JIN <jinyi_2001@foxmail.com>
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/dts-v1/;
+#include <ytmicro/ytm32/ytm32b1mc0.dtsi>
+
+/ {
+    model = "YTM YTM32 EVB";
+    compatible = "ytm,ytm32-evb";
+
+    chosen {
+        zephyr,sram = &sram0; 
+        zephyr,flash = &flash0;
+        zephyr,console = &uart1;
+        zephyr,shell-uart = &uart1;
+    };
+};
+
+&uart1 {
+    status = "okay";
+    current-speed = <115200>;
+};

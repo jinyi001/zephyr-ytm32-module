@@ -1,0 +1,15 @@
+# Copyright (c) 2026 YI JIN <jinyi_2001@foxmail.com>
+# SPDX-License-Identifier: Apache-2.0
+
+if SOC_SERIES_YTM32B1M
+
+config NUM_IRQS
+	default 76
+
+config SYS_CLOCK_HW_CYCLES_PER_SEC
+	default 80000000 
+
+config CORTEX_M_SYSTICK
+	default y
+
+endif # SOC_SERIES_YTM32B1M

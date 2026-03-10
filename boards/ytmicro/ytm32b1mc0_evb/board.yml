@@ -1,0 +1,9 @@
+# Copyright (c) 2026 YI JIN <jinyi_2001@foxmail.com>
+# SPDX-License-Identifier: Apache-2.0
+
+board:
+  name: ytm32b1mc0_evb
+  full_name: YTM32B1MC0-EVB-Q64 Rev.A
+  vendor: ytmicro
+  socs:
+    - name: ytm32b1mc0

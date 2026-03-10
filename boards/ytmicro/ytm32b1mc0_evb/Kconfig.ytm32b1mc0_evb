@@ -1,0 +1,5 @@
+# Copyright (c) 2026 YI JIN <jinyi_2001@foxmail.com>
+# SPDX-License-Identifier: Apache-2.0
+
+config BOARD_YTM32B1MC0_EVB
+	select SOC_YTM32B1MC0

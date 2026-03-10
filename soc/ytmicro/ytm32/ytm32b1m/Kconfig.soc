@@ -1,0 +1,26 @@
+# Copyright (c) 2026 YI JIN <jinyi_2001@foxmail.com>
+# SPDX-License-Identifier: Apache-2.0
+
+config SOC_SERIES_YTM32B1M
+	bool
+	select SOC_FAMILY_YTMICRO_YTM32
+	select ARM
+	select CPU_CORTEX_M
+	select CPU_CORTEX_M33
+	select HAS_SEGGER_RTT if ZEPHYR_SEGGER_MODULE
+
+config SOC_SERIES
+	default "ytm32b1m" if SOC_SERIES_YTM32B1M
+
+config SOC_YTM32B1MC0
+	bool "YTM32B1MC0 MCU"
+	select SOC_SERIES_YTM32B1M
+
+config SOC
+	default "ytm32b1mc0" if SOC_YTM32B1MC0
+
+config SOC_PART_NUMBER_YTM32B1MC03H0MLHT
+	bool
+
+config SOC_PART_NUMBER
+	default "YTM32B1MC03H0MLHT" if SOC_PART_NUMBER_YTM32B1MC03H0MLHT

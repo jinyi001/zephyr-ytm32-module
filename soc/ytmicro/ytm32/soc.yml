@@ -1,0 +1,9 @@
+# Copyright (c) 2026 YI JIN <jinyi_2001@foxmail.com>
+# SPDX-License-Identifier: Apache-2.0
+
+family:
+- name: ytmicro_ytm32
+  series:
+  - name: ytm32b1m
+    socs:
+    - name: ytm32b1mc0
