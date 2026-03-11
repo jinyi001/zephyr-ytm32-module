@@ -8,5 +8,26 @@ properties:
   "#clock-cells":
     const: 1
 
+  core-clock:
+    type: int
+    required: true
+    description: |
+      Target core clock frequency in Hz.
+      Example: 120000000
+
+  core-divider:
+    type: int
+    required: true
+    description: |
+      Divider for the core clock relative to the system oscillator/PLL.
+      Valid values depend on the specific SoC (e.g., 1, 2, 4...).
+      
+  bus-divider:
+    type: int
+    required: true
+    description: |
+      Divider for the bus clock relative to the system oscillator/PLL.
+      Valid values depend on the specific SoC (e.g., 1, 2, 4...).
+
 clock-cells:
   - id

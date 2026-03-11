@@ -101,16 +101,14 @@ static int pinctrl_ytm32_init(void)
 		return -ENODEV;
 	}
 
-	/* 
-	 * Enable clocks for PCTRLA (2U) through PCTRLE (6U) 
-	 * The raw IDs are from clock_names_t in vendor HAL.
-	 */
-	for (uint32_t i = 2U; i <= 6U; i++) {
-		clock_control_on(cgu, (clock_control_subsys_t)i);
-	}
+#define PINCTRL_NODE DT_NODELABEL(pinctrl)
 
-	/* Enable GPIO clock (1U) */
-	clock_control_on(cgu, (clock_control_subsys_t)1U);
+	/* Enable clocks specified in devicetree */
+#if DT_NODE_HAS_PROP(PINCTRL_NODE, clocks)
+#define CLOCK_INIT(node_id, prop, idx) \
+	clock_control_on(cgu, (clock_control_subsys_t)DT_CLOCKS_CELL_BY_IDX(node_id, idx, id));
+	DT_FOREACH_PROP_ELEM(PINCTRL_NODE, clocks, CLOCK_INIT)
+#endif
 
 	return 0;
 }

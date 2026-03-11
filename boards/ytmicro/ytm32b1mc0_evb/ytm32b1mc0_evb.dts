@@ -19,6 +19,13 @@
     };
 };
 
+&cgu {
+    status = "okay";
+    core-clock = <120000000>;
+    core-divider = <1>;
+    bus-divider = <2>;
+};
+
 &pinctrl {
     uart1_default: uart1_default {
         group1 {

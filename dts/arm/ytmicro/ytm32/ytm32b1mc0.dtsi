@@ -30,6 +30,12 @@
 
 	pinctrl: pinctrl {
 		compatible = "ytmicro,ytm32-pinctrl";
+		clocks = <&cgu 2>, /* YTM32_CLOCK_PCTRLA */
+			 <&cgu 3>, /* YTM32_CLOCK_PCTRLB */
+			 <&cgu 4>, /* YTM32_CLOCK_PCTRLC */
+			 <&cgu 5>, /* YTM32_CLOCK_PCTRLD */
+			 <&cgu 6>, /* YTM32_CLOCK_PCTRLE */
+			 <&cgu 1>; /* YTM32_CLOCK_GPIO */
 		status = "okay";
 	};
 

@@ -9,6 +9,13 @@ include:
   - name: base.yaml
   - name: pincfg-node.yaml
 
+properties:
+  clocks:
+    type: phandle-array
+    required: true
+    description: |
+      Clocks required by the pin controller (e.g. GPIO, PCTRL clocks).
+
 child-binding:
   description: |
     YTM32 pin controller pin configuration state nodes.
