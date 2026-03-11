@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 CONFIG_SOC_YTM32B1MC0=y
+CONFIG_PINCTRL=y
 
 # Console
 CONFIG_SERIAL=y

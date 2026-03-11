@@ -1,0 +1,35 @@
+# Copyright (c) 2026 YTMicro
+# SPDX-License-Identifier: Apache-2.0
+
+description: YTM32 Pin Controller
+
+compatible: "ytmicro,ytm32-pinctrl"
+
+include:
+  - name: base.yaml
+  - name: pincfg-node.yaml
+
+child-binding:
+  description: |
+    YTM32 pin controller pin configuration state nodes.
+
+  child-binding:
+    description: |
+      YTM32 pin controller pin configuration group nodes.
+
+    properties:
+      pinmux:
+        required: true
+        type: array
+        description: |
+          An array of pin configurations.
+          Each configuration is a 32-bit integer combining port, pin, and mux function.
+          Use the YTM32_PINMUX macro to construct these values.
+
+      drive-strength:
+        type: string
+        enum:
+          - "low"
+          - "high"
+        description: |
+          Drive strength of the pin.

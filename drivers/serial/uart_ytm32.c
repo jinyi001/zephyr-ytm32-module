@@ -3,6 +3,7 @@
 #include <zephyr/drivers/uart.h>
 #include <zephyr/device.h>
 #include <zephyr/drivers/clock_control.h>
+#include <zephyr/drivers/pinctrl.h>
 #include <errno.h>
 
 /* 规避 Zephyr API 和厂商 HAL API 对 uart_callback_t 命名的冲突 */
@@ -16,6 +17,7 @@ struct uart_ytm32_config {
     uint32_t baud_rate;
     const struct device *clock_dev;
     clock_control_subsys_t clock_subsys;
+    const struct pinctrl_dev_config *pincfg;
 };
 
 struct uart_ytm32_data {
@@ -79,6 +81,11 @@ static int uart_ytm32_init(const struct device *dev)
         return ret;
     }
 
+    ret = pinctrl_apply_state(config->pincfg, PINCTRL_STATE_DEFAULT);
+    if (ret < 0) {
+        return ret;
+    }
+
     /* 2. 调用厂商 HAL 进行 UART 初始化 */
     UART_DRV_GetDefaultConfig(&hal_config);
     hal_config.baudRate = config->baud_rate;
@@ -97,12 +104,14 @@ static int uart_ytm32_init(const struct device *dev)
 }
 
 #define YTM32_UART_INIT(n)                                                   \
+    PINCTRL_DT_INST_DEFINE(n);                                               \
     static struct uart_ytm32_data uart_ytm32_data_##n;                       \
     static const struct uart_ytm32_config uart_ytm32_config_##n = {          \
         .base = DT_INST_REG_ADDR(n),                                         \
         .baud_rate = DT_INST_PROP(n, current_speed),                         \
         .clock_dev = DEVICE_DT_GET(DT_INST_CLOCKS_CTLR(n)),                  \
         .clock_subsys = (clock_control_subsys_t)DT_INST_CLOCKS_CELL(n, id),  \
+        .pincfg = PINCTRL_DT_INST_DEV_CONFIG_GET(n),                         \
     };                                                                       \
     DEVICE_DT_INST_DEFINE(n, &uart_ytm32_init, NULL, &uart_ytm32_data_##n,   \
                           &uart_ytm32_config_##n, PRE_KERNEL_1,              \

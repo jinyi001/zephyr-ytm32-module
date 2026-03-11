@@ -68,40 +68,7 @@ static const clock_manager_user_config_t *g_clockManConfigsArr[] = {
 
 static clock_manager_callback_user_config_t *g_clockManCallbacksArr[] = {(void *)0};
 
-#define NUM_OF_CONFIGURED_PINS0_UART (2U)
 
-static const pin_settings_config_t g_pin_mux_InitConfigArr0_uart[NUM_OF_CONFIGURED_PINS0_UART] = {
-    /* PTC_8-36-UART1_RX- */
-    {
-        .base = PCTRLC,
-        .pinPortIdx = 8U,
-        .pullConfig = PCTRL_INTERNAL_PULL_NOT_ENABLED,
-        .passiveFilter = false,
-        .driveSelect = PCTRL_LOW_DRIVE_STRENGTH,
-        .mux = PCTRL_MUX_ALT2,
-        .intConfig = PCTRL_DMA_INT_DISABLED,
-        .clearIntFlag = false,
-        .digitalFilter = false,
-        .gpioBase = GPIOC,
-        .direction = GPIO_INPUT_DIRECTION,
-        .initValue = 0,
-    },
-    /* PTC_9-35-UART1_TX- */
-    {
-        .base = PCTRLC,
-        .pinPortIdx = 9U,
-        .pullConfig = PCTRL_INTERNAL_PULL_NOT_ENABLED,
-        .passiveFilter = false,
-        .driveSelect = PCTRL_LOW_DRIVE_STRENGTH,
-        .mux = PCTRL_MUX_ALT2,
-        .intConfig = PCTRL_DMA_INT_DISABLED,
-        .clearIntFlag = false,
-        .digitalFilter = false,
-        .gpioBase = GPIOC,
-        .direction = GPIO_INPUT_DIRECTION,
-        .initValue = 0,
-    },
-};
 
 void soc_early_init_hook(void)
 {
@@ -113,7 +80,6 @@ static int ytm32_soc_init(void)
 	CLOCK_SYS_Init(g_clockManConfigsArr, 1U, g_clockManCallbacksArr, 0U);
 	CLOCK_SYS_UpdateConfiguration(0U, CLOCK_MANAGER_POLICY_AGREEMENT);
 
-	PINS_DRV_Init(NUM_OF_CONFIGURED_PINS0_UART, g_pin_mux_InitConfigArr0_uart);
 	return 0;
 }
 

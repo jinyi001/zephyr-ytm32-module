@@ -4,6 +4,7 @@
  */
 
 #include <arm/armv8-m.dtsi>
+#include "ytm32b1mc0-pinctrl.dtsi"
 
 / {
 	model = "YTMicro YTM32B1MC0";
@@ -36,6 +37,11 @@
 		cgu: cgu {
 			compatible = "ytmicro,ytm32-cgu";
 			#clock-cells = <1>;
+			status = "okay";
+		};
+
+		pinctrl: pinctrl {
+			compatible = "ytmicro,ytm32-pinctrl";
 			status = "okay";
 		};
 
