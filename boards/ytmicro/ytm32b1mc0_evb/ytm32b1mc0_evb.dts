@@ -5,6 +5,7 @@
 
 /dts-v1/;
 #include <ytmicro/ytm32/ytm32b1mc0.dtsi>
+#include <zephyr/dt-bindings/pinctrl/ytm32-pinctrl.h>
 
 / {
     model = "YTM YTM32 EVB";
@@ -21,8 +22,8 @@
 &pinctrl {
     uart1_default: uart1_default {
         group1 {
-            pinmux = <YTM32_PINMUX(YTM32_PORTC, 8, 2)>,
-                     <YTM32_PINMUX(YTM32_PORTC, 9, 2)>;
+            pinmux = <YTM32_PTC8_UART1_RX>,
+                     <YTM32_PTC9_UART1_TX>;
         };
     };
 };

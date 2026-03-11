@@ -4,7 +4,6 @@
  */
 
 #include <arm/armv8-m.dtsi>
-#include "ytm32b1mc0-pinctrl.dtsi"
 
 / {
 	model = "YTMicro YTM32B1MC0";
