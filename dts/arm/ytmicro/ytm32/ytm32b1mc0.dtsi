@@ -22,6 +22,17 @@
 		};
 	};
 
+	cgu: cgu {
+		compatible = "ytmicro,ytm32-cgu";
+		#clock-cells = <1>;
+		status = "okay";
+	};
+
+	pinctrl: pinctrl {
+		compatible = "ytmicro,ytm32-pinctrl";
+		status = "okay";
+	};
+
 	soc {
 		flash0: flash@0 {
 			compatible = "soc-nv-flash";
@@ -31,17 +42,6 @@
 		sram0: memory@20000000 {
 			compatible = "mmio-sram";
 			reg = <0x20000000 0x8000>;
-		};
-
-		cgu: cgu {
-			compatible = "ytmicro,ytm32-cgu";
-			#clock-cells = <1>;
-			status = "okay";
-		};
-
-		pinctrl: pinctrl {
-			compatible = "ytmicro,ytm32-pinctrl";
-			status = "okay";
 		};
 
 		uart0: uart@4001b000 { 
