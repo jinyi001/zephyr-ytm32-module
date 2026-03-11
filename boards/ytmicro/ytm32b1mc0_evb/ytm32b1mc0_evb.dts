@@ -22,8 +22,15 @@
 &pinctrl {
     uart1_default: uart1_default {
         group1 {
-            pinmux = <YTM32_PTC8_UART1_RX>,
-                     <YTM32_PTC9_UART1_TX>;
+            pinmux = <YTM32_PTC8_UART1_RX>;
+            bias-pull-up;
+            ytmicro,passive-filter;
+        };
+        group2 {
+            pinmux = <YTM32_PTC9_UART1_TX>;
+            drive-push-pull;
+            drive-strength = "high";
+            slew-rate = "fast";
         };
     };
 };

@@ -33,10 +33,50 @@ int pinctrl_configure_pins(const pinctrl_soc_pin_t *pins, uint8_t pin_cnt, uintp
 
 		config[i].base = base;
 		config[i].pinPortIdx = pin;
-		config[i].pullConfig = PCTRL_INTERNAL_PULL_NOT_ENABLED;
-		config[i].passiveFilter = false;
-		config[i].driveSelect = PCTRL_LOW_DRIVE_STRENGTH;
 		config[i].mux = mux;
+
+		/* Pull configuration */
+		if (pins[i].pincfg & YTM32_PULL_UP_MSK) {
+			config[i].pullConfig = PCTRL_INTERNAL_PULL_UP_ENABLED;
+		} else if (pins[i].pincfg & YTM32_PULL_DOWN_MSK) {
+			config[i].pullConfig = PCTRL_INTERNAL_PULL_DOWN_ENABLED;
+		} else {
+			config[i].pullConfig = PCTRL_INTERNAL_PULL_NOT_ENABLED;
+		}
+
+		/* Drive strength */
+#if FEATURE_PINS_HAS_DRIVE_STRENGTH
+		if (pins[i].pincfg & YTM32_DRV_STR_MSK) {
+			config[i].driveSelect = PCTRL_HIGH_DRIVE_STRENGTH;
+		} else {
+			config[i].driveSelect = PCTRL_LOW_DRIVE_STRENGTH;
+		}
+#endif
+
+		/* Open drain */
+#if FEATURE_PINS_HAS_OPEN_DRAIN
+		if (pins[i].pincfg & YTM32_OPEN_DRAIN_MSK) {
+			config[i].openDrain = PCTRL_OPEN_DRAIN_ENABLED;
+		} else {
+			config[i].openDrain = PCTRL_OPEN_DRAIN_DISABLED;
+		}
+#endif
+
+		/* Slew rate */
+#if FEATURE_PINS_HAS_SLEW_RATE
+		if (pins[i].pincfg & YTM32_SLEW_RATE_MSK) {
+			config[i].rateSelect = PCTRL_FAST_SLEW_RATE;
+		} else {
+			config[i].rateSelect = PCTRL_SLOW_SLEW_RATE;
+		}
+#endif
+
+		/* Passive filter */
+#if FEATURE_PINS_HAS_PASSIVE_FILTER
+		config[i].passiveFilter = (pins[i].pincfg & YTM32_PASSIVE_FLT_MSK) ? true : false;
+#endif
+		
+		/* Fixed defaults for parameters not currently needed in pinctrl */
 		config[i].intConfig = PCTRL_DMA_INT_DISABLED;
 		config[i].clearIntFlag = false;
 		config[i].digitalFilter = false;
