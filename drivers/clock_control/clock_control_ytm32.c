@@ -10,52 +10,54 @@
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(clock_control_ytm32, CONFIG_CLOCK_CONTROL_LOG_LEVEL);
 #include <zephyr/drivers/clock_control.h>
+#include <zephyr/drivers/clock_control/ytm32_soc_clock.h>
 #include <zephyr/device.h>
 #include <zephyr/spinlock.h>
-#include <zephyr/sys/printk.h>
 #include <zephyr/sys/util.h>
+#include <zephyr/dt-bindings/clock/ytmicro,ytm32-clock.h>
 
-#define YTM32_FIRC_HZ 80000000U
-#define YTM32_CLOCK_GPIO 1U
-#define YTM32_CLOCK_PCTRLA 2U
-#define YTM32_CLOCK_PCTRLB 3U
-#define YTM32_CLOCK_PCTRLC 4U
-#define YTM32_CLOCK_PCTRLD 5U
-#define YTM32_CLOCK_PCTRLE 6U
-#define YTM32_CLOCK_UART0 7U
-#define YTM32_CLOCK_UART1 8U
-#define YTM32_CLOCK_UART2 9U
-#define YTM32_CLOCK_CORE 40U
-#define YTM32_CLOCK_FAST_BUS 41U
-#define YTM32_CLOCK_SLOW_BUS 42U
-#define YTM32_CLOCK_SRC_DISABLED 0U
-#define YTM32_CLOCK_SRC_FIRC 1U
-#define YTM32_CLOCK_SRC_SIRC 2U
-#define YTM32_CLOCK_SRC_FXOSC 3U
-#define YTM32_CLOCK_SRC_LPO 4U
-#define YTM32_CLOCK_SRC_FAST_BUS 7U
+/* Driver-private constants — not part of the dt-binding public API */
 #define YTM32_IPC_DIV_MIN 1U
 #define YTM32_IPC_DIV_MAX 16U
-#define YTM32_CLOCK_IPC_END 39U
-#define YTM32_STATUS_SUCCESS 0U
-#define YTM32_STATUS_UNSUPPORTED 4U
-#define YTM32_STATUS_MCU_GATED_OFF 0x100U
 
-#define YTM32_CMU_ENABLED IS_ENABLED(CONFIG_CLOCK_CONTROL_YTM32_CMU)
-#define YTM32_CMU_RESET_ENABLED \
-	(YTM32_CMU_ENABLED && IS_ENABLED(CONFIG_CLOCK_CONTROL_YTM32_CMU_RESET))
-#define YTM32_SIRC_DEEPSLEEP_ENABLED \
-	IS_ENABLED(CONFIG_CLOCK_CONTROL_YTM32_KEEP_SIRC_IN_DEEPSLEEP)
-#define YTM32_SIRC_STANDBY_ENABLED \
-	IS_ENABLED(CONFIG_CLOCK_CONTROL_YTM32_KEEP_SIRC_IN_STANDBY)
+/*
+ * HAL status codes — sourced from vendor SDK status_t conventions.
+ * Used only inside this driver to bridge HAL return values to errno.
+ *   STATUS_SUCCESS      = 0
+ *   STATUS_UNSUPPORTED  = 4
+ *   STATUS_MCU_GATED_OFF = 0x100
+ */
+#define YTM32_HAL_STATUS_SUCCESS       0U
+#define YTM32_HAL_STATUS_UNSUPPORTED   4U
+#define YTM32_HAL_STATUS_MCU_GATED_OFF 0x100U
 
+/**
+ * @brief Convert a vendor HAL status_t value to a Zephyr errno.
+ *
+ * Mapping derived from the YTM32 SDK status_t enumeration:
+ *   STATUS_SUCCESS       (0)     -> 0
+ *   STATUS_UNSUPPORTED   (4)     -> -ENOTSUP
+ *   STATUS_MCU_GATED_OFF (0x100) -> -EAGAIN  (clock gated, may succeed later)
+ *   anything else                -> -EIO
+ */
+static inline int ytm32_hal_status_to_errno(int hal_status)
+{
+	switch ((uint32_t)hal_status) {
+	case YTM32_HAL_STATUS_SUCCESS:
+		return 0;
+	case YTM32_HAL_STATUS_UNSUPPORTED:
+		return -ENOTSUP;
+	case YTM32_HAL_STATUS_MCU_GATED_OFF:
+		return -EAGAIN;
+	default:
+		return -EIO;
+	}
+}
+
+/* Vendor HAL clock functions (from modules/hal/ytmicro SDK) */
 extern void CLOCK_DRV_SetModuleClock(uint32_t clockName, bool clockGate,
 				     uint32_t clkSrc, uint32_t divider);
 extern int CLOCK_SYS_GetFreq(uint32_t clockName, uint32_t *frequency);
-extern int ytm32_soc_apply_clock_config(uint32_t core_clock,
-				       uint32_t core_divider,
-				       uint32_t fast_bus_divider,
-				       uint32_t slow_bus_divider);
 
 struct clock_control_ytm32_config {
 	uint32_t core_clock;
@@ -123,6 +125,7 @@ static const struct ytm32_module_clock_config *ytm32_find_module_clock(uint32_t 
 
 	return NULL;
 }
+
 
 static const char *ytm32_clock_label(uint32_t clock_id)
 {
@@ -196,11 +199,12 @@ static int ytm32_validate_module_clock(const struct ytm32_module_clock_config *c
 static int ytm32_log_system_rate(uint32_t clock_id, const char *label)
 {
 	uint32_t rate = 0U;
-	int status = CLOCK_SYS_GetFreq(clock_id, &rate);
+	int hal_status = CLOCK_SYS_GetFreq(clock_id, &rate);
+	int ret = ytm32_hal_status_to_errno(hal_status);
 
-	if (status != YTM32_STATUS_SUCCESS) {
-		LOG_ERR("Failed to query %s rate (status %d)", label, status);
-		return -EIO;
+	if (ret != 0) {
+		LOG_ERR("Failed to query %s rate (HAL status %d)", label, hal_status);
+		return ret;
 	}
 
 	LOG_INF("%s rate: %u Hz", label, rate);
@@ -217,31 +221,21 @@ static bool ytm32_is_system_clock_id(uint32_t clock_id)
 static int ytm32_query_clock_rate(uint32_t clock_id, const char *label,
 				       uint32_t *rate)
 {
-	int status;
+	int hal_status;
+	int ret;
 
 	if (rate == NULL) {
 		return -EINVAL;
 	}
 
-	status = CLOCK_SYS_GetFreq(clock_id, rate);
-	if (status == YTM32_STATUS_SUCCESS) {
-		return 0;
+	hal_status = CLOCK_SYS_GetFreq(clock_id, rate);
+	ret = ytm32_hal_status_to_errno(hal_status);
+
+	if (ret != 0) {
+		LOG_ERR("Failed to query %s rate (HAL status %d)", label, hal_status);
 	}
 
-	if (status == YTM32_STATUS_MCU_GATED_OFF) {
-		return -EAGAIN;
-	}
-
-	if (status == YTM32_STATUS_UNSUPPORTED) {
-		return -ENOTSUP;
-	}
-
-	if (status != YTM32_STATUS_SUCCESS) {
-		LOG_ERR("Failed to query %s rate (status %d)", label, status);
-		return -EIO;
-	}
-
-	return -EIO;
+	return ret;
 }
 
 static int ytm32_module_clock_request(const struct device *dev, uint32_t clock_id,
@@ -335,9 +329,6 @@ static int ytm32_refresh_system_rates(const struct device *dev)
 	}
 
 	data->system_rates_valid = true;
-
-	printk("ytm32 system clocks: core=%u Hz fast_bus=%u Hz slow_bus=%u Hz\n",
-	       data->core_rate, data->fast_bus_rate, data->slow_bus_rate);
 
 	return 0;
 }

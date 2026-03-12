@@ -7,36 +7,15 @@
 #include "system_YTM32B1MC0.h"
 #include "clock.h"
 #include <zephyr/init.h>
+#include <zephyr/dt-bindings/clock/ytmicro,ytm32-clock.h>
+#include <zephyr/drivers/clock_control/ytm32_soc_clock.h>
 
-#define YTM32_FIRC_HZ 80000000U
-#define YTM32_FXOSC_HZ 24000000U
+/* YTM32_FIRC_HZ and YTM32_FXOSC_HZ are now defined in the shared
+ * dt-bindings header <zephyr/dt-bindings/clock/ytmicro,ytm32-clock.h>.
+ */
+
 #define YTM32_CLOCK_CONFIG_COUNT 1U
 #define YTM32_CLOCK_CONFIG_INDEX 0U
-
-#if defined(CONFIG_CLOCK_CONTROL_YTM32_CMU)
-#define YTM32_CMU_ENABLED true
-#else
-#define YTM32_CMU_ENABLED false
-#endif
-
-#if defined(CONFIG_CLOCK_CONTROL_YTM32_CMU) && \
-	defined(CONFIG_CLOCK_CONTROL_YTM32_CMU_RESET)
-#define YTM32_CMU_RESET_ENABLED true
-#else
-#define YTM32_CMU_RESET_ENABLED false
-#endif
-
-#if defined(CONFIG_CLOCK_CONTROL_YTM32_KEEP_SIRC_IN_DEEPSLEEP)
-#define YTM32_SIRC_DEEPSLEEP_ENABLED true
-#else
-#define YTM32_SIRC_DEEPSLEEP_ENABLED false
-#endif
-
-#if defined(CONFIG_CLOCK_CONTROL_YTM32_KEEP_SIRC_IN_STANDBY)
-#define YTM32_SIRC_STANDBY_ENABLED true
-#else
-#define YTM32_SIRC_STANDBY_ENABLED false
-#endif
 
 static const cmu_config_t ytm32_cmu_config = {
 	.fircClockMonitor = {
