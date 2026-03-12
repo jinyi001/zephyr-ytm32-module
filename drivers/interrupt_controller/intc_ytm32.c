@@ -9,6 +9,21 @@
 
 /* --- Vendor HAL Interrupt Manager Overrides --- */
 
+/*
+ * WARNING: Known limitation
+ *
+ * This global interrupt disable counter is maintained independently from
+ * Zephyr's irq_lock()/irq_unlock() nesting. If vendor HAL code calls
+ * INT_SYS_DisableIRQGlobal() while a Zephyr driver holds irq_lock(),
+ * the two counters will diverge. In practice this is safe because:
+ *
+ * 1. Zephyr drivers use irq_lock(), not INT_SYS_DisableIRQGlobal().
+ * 2. Vendor HAL init functions may call
+ *    INT_SYS_DisableIRQGlobal()/INT_SYS_EnableIRQGlobal() in matched pairs.
+ *
+ * If future HAL usage breaks this assumption, consider replacing this
+ * counter with a wrapper around Zephyr's irq_lock()/irq_unlock().
+ */
 static int32_t g_interruptDisableCount = 0;
 
 void INT_SYS_InstallHandler(IRQn_Type irqNumber, isr_t newHandler, isr_t *oldHandler)

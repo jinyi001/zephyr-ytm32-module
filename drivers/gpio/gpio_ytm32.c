@@ -10,7 +10,6 @@
 #include <zephyr/drivers/clock_control.h>
 #include <zephyr/irq.h>
 #include <zephyr/logging/log.h>
-#include <zephyr/sys/printk.h>
 
 LOG_MODULE_REGISTER(gpio_ytm32, CONFIG_GPIO_LOG_LEVEL);
 
@@ -30,33 +29,46 @@ LOG_MODULE_REGISTER(gpio_ytm32, CONFIG_GPIO_LOG_LEVEL);
  * This GPIO driver only manages direction, data, and interrupts.
  */
 
-/* GPIO register offsets */
-#define GPIO_PDOR_OFFSET 0x00
-#define GPIO_PSOR_OFFSET 0x04
-#define GPIO_PCOR_OFFSET 0x08
-#define GPIO_PTOR_OFFSET 0x0C
-#define GPIO_PDIR_OFFSET 0x10
-#define GPIO_POER_OFFSET 0x14
-#define GPIO_PIER_OFFSET 0x18
-#define GPIO_PIFR_OFFSET 0x1C
-#define GPIO_PCR_OFFSET  0x80
+/* ---------------------------------------------------------------------------
+ * GPIO register offsets (RM §6.2.1, Table 6.1)
+ * ---------------------------------------------------------------------------*/
+#define GPIO_PDOR_OFFSET 0x00  /* Port Data Output Register        (RW)  */
+#define GPIO_PSOR_OFFSET 0x04  /* Port Set Output Register         (WO)  */
+#define GPIO_PCOR_OFFSET 0x08  /* Port Clear Output Register       (WO)  */
+#define GPIO_PTOR_OFFSET 0x0C  /* Port Toggle Output Register      (WO)  */
+#define GPIO_PDIR_OFFSET 0x10  /* Port Data Input Register         (RO)  */
+#define GPIO_POER_OFFSET 0x14  /* Port Output Enable Register      (RW)  */
+#define GPIO_PIER_OFFSET 0x18  /* Port Input Enable Register       (RW)  */
+#define GPIO_PIFR_OFFSET 0x1C  /* Port Interrupt Status Flag Reg   (W1C) */
+#define GPIO_PCR_OFFSET  0x80  /* Per-pin Control Register base    (RW)  */
 
-/* PCTRL PCR register fields (pin mux control) */
-#define PCTRL_PCR_MUX_MASK   0x700U
-#define PCTRL_PCR_MUX_SHIFT  8U
-#define PCTRL_MUX_AS_GPIO    1U
+/* Per-pin register stride: PCR[n] is at GPIO_PCR_OFFSET + n * PCR_REG_STRIDE,
+ * likewise PCTRL PCR[n] is at pctrl_base + n * PCR_REG_STRIDE.             */
+#define PCR_REG_STRIDE   4U
 
-/* PCR IRQC field */
-#define GPIO_PCR_IRQC_MASK  0xFU
+/* ---------------------------------------------------------------------------
+ * GPIO PCR register fields (RM §6.2.1.9, Table 6.10)
+ * ---------------------------------------------------------------------------*/
+#define GPIO_PCR_INVE_BIT   4U     /* Invert Enable (bit 4)           */
+#define GPIO_PCR_IRQC_MASK  0xFU   /* Interrupt Configuration [3:0]   */
 #define GPIO_PCR_IRQC_SHIFT 0U
 
-/* IRQC values */
-#define IRQC_DISABLED       0x0U
-#define IRQC_INT_RISING     0x9U
-#define IRQC_INT_FALLING    0xAU
-#define IRQC_INT_EITHER     0xBU
-#define IRQC_INT_LOGIC_ZERO 0x8U
-#define IRQC_INT_LOGIC_ONE  0xCU
+/* IRQC field encodings (RM §6.2.1.9) */
+#define IRQC_DISABLED       0x0U   /* Interrupt disabled              */
+#define IRQC_INT_LOGIC_ZERO 0x8U   /* Interrupt when logic 0          */
+#define IRQC_INT_RISING     0x9U   /* Interrupt on rising-edge        */
+#define IRQC_INT_FALLING    0xAU   /* Interrupt on falling-edge       */
+#define IRQC_INT_EITHER     0xBU   /* Interrupt on either edge        */
+#define IRQC_INT_LOGIC_ONE  0xCU   /* Interrupt when logic 1          */
+
+/* ---------------------------------------------------------------------------
+ * PCTRL PCR register fields — pin mux control (RM §7.3.1.1, Table 7.3)
+ * ---------------------------------------------------------------------------*/
+#define PCTRL_PCR_PE_BIT     1U      /* Pull Enable                      */
+#define PCTRL_PCR_PS_BIT     0U      /* Pull Select (0=down, 1=up)       */
+#define PCTRL_PCR_MUX_MASK   0x700U  /* Port Function Selection [10:8] */
+#define PCTRL_PCR_MUX_SHIFT  8U
+#define PCTRL_MUX_AS_GPIO    1U      /* Alternative 1 = GPIO function  */
 
 struct gpio_ytm32_config {
 	/* gpio_driver_config needs to be first */
@@ -113,10 +125,26 @@ static int gpio_ytm32_configure(const struct device *dev,
 	/* Set pin mux to GPIO mode (mux=1) via PCTRL->PCR[pin] */
 	{
 		uintptr_t pctrl_base = cfg->pctrl_base;
-		uint32_t pcr = sys_read32(pctrl_base + pin * 4);
+		uint32_t pcr = sys_read32(pctrl_base + pin * PCR_REG_STRIDE);
 		pcr &= ~PCTRL_PCR_MUX_MASK;
 		pcr |= (PCTRL_MUX_AS_GPIO << PCTRL_PCR_MUX_SHIFT) & PCTRL_PCR_MUX_MASK;
-		sys_write32(pcr, pctrl_base + pin * 4);
+		sys_write32(pcr, pctrl_base + pin * PCR_REG_STRIDE);
+	}
+
+	/* Configure pull-up / pull-down via PCTRL PCR[pin] */
+	{
+		uintptr_t pctrl_base = cfg->pctrl_base;
+		uint32_t pcr = sys_read32(pctrl_base + pin * PCR_REG_STRIDE);
+
+		pcr &= ~(BIT(PCTRL_PCR_PE_BIT) | BIT(PCTRL_PCR_PS_BIT));
+
+		if ((flags & GPIO_PULL_UP) != 0) {
+			pcr |= BIT(PCTRL_PCR_PE_BIT) | BIT(PCTRL_PCR_PS_BIT);
+		} else if ((flags & GPIO_PULL_DOWN) != 0) {
+			pcr |= BIT(PCTRL_PCR_PE_BIT);
+		}
+
+		sys_write32(pcr, pctrl_base + pin * PCR_REG_STRIDE);
 	}
 
 	if ((flags & GPIO_OUTPUT) != 0) {
@@ -167,11 +195,9 @@ static int gpio_ytm32_port_set_masked_raw(const struct device *dev,
 {
 	const struct gpio_ytm32_config *cfg = dev->config;
 	uintptr_t base = cfg->base;
-	uint32_t pdor;
 
-	pdor = gpio_reg_read(base, GPIO_PDOR_OFFSET);
-	pdor = (pdor & ~mask) | (mask & value);
-	gpio_reg_write(base, GPIO_PDOR_OFFSET, pdor);
+	gpio_reg_write(base, GPIO_PSOR_OFFSET, mask & value);
+	gpio_reg_write(base, GPIO_PCOR_OFFSET, mask & ~value);
 
 	return 0;
 }
@@ -235,11 +261,11 @@ static int gpio_ytm32_pin_interrupt_configure(const struct device *dev,
 		}
 	}
 
-	/* Write IRQC to PCR[pin] */
-	pcr = sys_read32(base + GPIO_PCR_OFFSET + pin * 4);
+	/* Write IRQC to GPIO PCR[pin] */
+	pcr = sys_read32(base + GPIO_PCR_OFFSET + pin * PCR_REG_STRIDE);
 	pcr &= ~GPIO_PCR_IRQC_MASK;
 	pcr |= (irqc << GPIO_PCR_IRQC_SHIFT) & GPIO_PCR_IRQC_MASK;
-	sys_write32(pcr, base + GPIO_PCR_OFFSET + pin * 4);
+	sys_write32(pcr, base + GPIO_PCR_OFFSET + pin * PCR_REG_STRIDE);
 
 	/* Clear any pending flag */
 	gpio_reg_write(base, GPIO_PIFR_OFFSET, BIT(pin));
@@ -330,7 +356,6 @@ static int gpio_ytm32_init(const struct device *dev)
 			return ret;
 		}
 
-		printk("%s functional clock: %u Hz\n", dev->name, clock_rate);
 		LOG_INF("%s functional clock: %u Hz", dev->name, clock_rate);
 	}
 
