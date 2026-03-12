@@ -13,9 +13,10 @@
 
 int pinctrl_configure_pins(const pinctrl_soc_pin_t *pins, uint8_t pin_cnt, uintptr_t reg)
 {
-	pin_settings_config_t config[pin_cnt];
+	ARG_UNUSED(reg);
 
 	for (uint8_t i = 0; i < pin_cnt; i++) {
+		pin_settings_config_t config;
 		uint32_t pinmux = pins[i].pinmux;
 		uint32_t port = (pinmux >> 28) & 0xF;
 		uint32_t pin = (pinmux >> 24) & 0x1F;
@@ -23,72 +24,84 @@ int pinctrl_configure_pins(const pinctrl_soc_pin_t *pins, uint8_t pin_cnt, uintp
 
 		void *base = NULL;
 		void *gpio_base = NULL;
-		switch(port) {
-			case 0: base = PCTRLA; gpio_base = GPIOA; break;
-			case 1: base = PCTRLB; gpio_base = GPIOB; break;
-			case 2: base = PCTRLC; gpio_base = GPIOC; break;
-			case 3: base = PCTRLD; gpio_base = GPIOD; break;
-			case 4: base = PCTRLE; gpio_base = GPIOE; break;
-			default: return -EINVAL;
+
+		/*
+		 * Map port index (from DTS pinmux encoding) to vendor SDK
+		 * PCTRL/GPIO base pointers.
+		 *
+		 * These global macros (PCTRLA, GPIOA, etc.) are defined in the
+		 * vendor SDK header YTM32B1MC0.h and must not be modified.
+		 * Port index encoding: 0=A, 1=B, 2=C, 3=D, 4=E.
+		 */
+		switch (port) {
+		case 0:
+			base = PCTRLA;
+			gpio_base = GPIOA;
+			break;
+		case 1:
+			base = PCTRLB;
+			gpio_base = GPIOB;
+			break;
+		case 2:
+			base = PCTRLC;
+			gpio_base = GPIOC;
+			break;
+		case 3:
+			base = PCTRLD;
+			gpio_base = GPIOD;
+			break;
+		case 4:
+			base = PCTRLE;
+			gpio_base = GPIOE;
+			break;
+		default:
+			return -EINVAL;
 		}
 
-		config[i].base = base;
-		config[i].pinPortIdx = pin;
-		config[i].mux = mux;
+		config.base = base;
+		config.pinPortIdx = pin;
+		config.mux = mux;
 
 		/* Pull configuration */
 		if (pins[i].pincfg & YTM32_PULL_UP_MSK) {
-			config[i].pullConfig = PCTRL_INTERNAL_PULL_UP_ENABLED;
+			config.pullConfig = PCTRL_INTERNAL_PULL_UP_ENABLED;
 		} else if (pins[i].pincfg & YTM32_PULL_DOWN_MSK) {
-			config[i].pullConfig = PCTRL_INTERNAL_PULL_DOWN_ENABLED;
+			config.pullConfig = PCTRL_INTERNAL_PULL_DOWN_ENABLED;
 		} else {
-			config[i].pullConfig = PCTRL_INTERNAL_PULL_NOT_ENABLED;
+			config.pullConfig = PCTRL_INTERNAL_PULL_NOT_ENABLED;
 		}
 
-		/* Drive strength */
 #if FEATURE_PINS_HAS_DRIVE_STRENGTH
-		if (pins[i].pincfg & YTM32_DRV_STR_MSK) {
-			config[i].driveSelect = PCTRL_HIGH_DRIVE_STRENGTH;
-		} else {
-			config[i].driveSelect = PCTRL_LOW_DRIVE_STRENGTH;
-		}
+		config.driveSelect = (pins[i].pincfg & YTM32_DRV_STR_MSK) ?
+			PCTRL_HIGH_DRIVE_STRENGTH : PCTRL_LOW_DRIVE_STRENGTH;
 #endif
 
-		/* Open drain */
 #if FEATURE_PINS_HAS_OPEN_DRAIN
-		if (pins[i].pincfg & YTM32_OPEN_DRAIN_MSK) {
-			config[i].openDrain = PCTRL_OPEN_DRAIN_ENABLED;
-		} else {
-			config[i].openDrain = PCTRL_OPEN_DRAIN_DISABLED;
-		}
+		config.openDrain = (pins[i].pincfg & YTM32_OPEN_DRAIN_MSK) ?
+			PCTRL_OPEN_DRAIN_ENABLED : PCTRL_OPEN_DRAIN_DISABLED;
 #endif
 
-		/* Slew rate */
 #if FEATURE_PINS_HAS_SLEW_RATE
-		if (pins[i].pincfg & YTM32_SLEW_RATE_MSK) {
-			config[i].rateSelect = PCTRL_FAST_SLEW_RATE;
-		} else {
-			config[i].rateSelect = PCTRL_SLOW_SLEW_RATE;
-		}
+		config.rateSelect = (pins[i].pincfg & YTM32_SLEW_RATE_MSK) ?
+			PCTRL_FAST_SLEW_RATE : PCTRL_SLOW_SLEW_RATE;
 #endif
 
-		/* Passive filter */
 #if FEATURE_PINS_HAS_PASSIVE_FILTER
-		config[i].passiveFilter = (pins[i].pincfg & YTM32_PASSIVE_FLT_MSK) ? true : false;
+		config.passiveFilter = !!(pins[i].pincfg & YTM32_PASSIVE_FLT_MSK);
 #endif
-		
-		/* Fixed defaults for parameters not currently needed in pinctrl */
-		config[i].intConfig = PCTRL_DMA_INT_DISABLED;
-		config[i].clearIntFlag = false;
-		config[i].digitalFilter = false;
-		config[i].gpioBase = gpio_base; /* Required by vendor SDK to clear IRQ status even if not GPIO */
-		config[i].direction = GPIO_INPUT_DIRECTION;
-		config[i].initValue = 0;
-	}
 
-	status_t status = PINS_DRV_Init(pin_cnt, config);
-	if (status != STATUS_SUCCESS) {
-		return -EIO;
+		/* Fixed defaults for parameters not currently needed in pinctrl */
+		config.intConfig = PCTRL_DMA_INT_DISABLED;
+		config.clearIntFlag = false;
+		config.digitalFilter = false;
+		config.gpioBase = gpio_base;
+		config.direction = GPIO_INPUT_DIRECTION;
+		config.initValue = 0;
+
+		status_t status = PINS_DRV_Init(1U, &config);
+		if (status != STATUS_SUCCESS) {
+			return -EIO;
+		}
 	}
 
 	return 0;
