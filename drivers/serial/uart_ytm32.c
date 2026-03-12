@@ -77,9 +77,31 @@ static void uart_ytm32_poll_out(const struct device *dev, unsigned char c)
 
 static int uart_ytm32_err_check(const struct device *dev)
 {
-	ARG_UNUSED(dev);
+	const struct uart_ytm32_config *config = dev->config;
+	UART_Type *base = (UART_Type *)config->base;
+	int errors = 0;
 
-	return 0;
+	if (UART_GetStatusFlag(base, UART_RX_OVERRUN)) {
+		errors |= UART_ERROR_OVERRUN;
+		(void)UART_ClearStatusFlag(base, UART_RX_OVERRUN);
+	}
+
+	if (UART_GetStatusFlag(base, UART_FRAME_ERR)) {
+		errors |= UART_ERROR_FRAMING;
+		(void)UART_ClearStatusFlag(base, UART_FRAME_ERR);
+	}
+
+	if (UART_GetStatusFlag(base, UART_PARITY_ERR)) {
+		errors |= UART_ERROR_PARITY;
+		(void)UART_ClearStatusFlag(base, UART_PARITY_ERR);
+	}
+
+	if (UART_GetStatusFlag(base, UART_NOISE_DETECT)) {
+		errors |= UART_ERROR_NOISE;
+		(void)UART_ClearStatusFlag(base, UART_NOISE_DETECT);
+	}
+
+	return errors;
 }
 
 static const struct uart_driver_api uart_ytm32_driver_api = {

@@ -31,12 +31,12 @@
 
 	pinctrl: pinctrl {
 		compatible = "ytmicro,ytm32-pinctrl";
-		clocks = <&cgu 2>, /* YTM32_CLOCK_PCTRLA */
-			 <&cgu 3>, /* YTM32_CLOCK_PCTRLB */
-			 <&cgu 4>, /* YTM32_CLOCK_PCTRLC */
-			 <&cgu 5>, /* YTM32_CLOCK_PCTRLD */
-			 <&cgu 6>, /* YTM32_CLOCK_PCTRLE */
-			 <&cgu 1>; /* YTM32_CLOCK_GPIO */
+		clocks = <&cgu YTM32_CLOCK_PCTRLA>,
+			 <&cgu YTM32_CLOCK_PCTRLB>,
+			 <&cgu YTM32_CLOCK_PCTRLC>,
+			 <&cgu YTM32_CLOCK_PCTRLD>,
+			 <&cgu YTM32_CLOCK_PCTRLE>,
+			 <&cgu YTM32_CLOCK_GPIO>;
 		status = "okay";
 	};
 
@@ -55,7 +55,7 @@
 			compatible = "ytmicro,ytm32-uart";
 			reg = <0x4001b000 0x1000>;
 			interrupts = <31 0>;
-			clocks = <&cgu 7>;
+			clocks = <&cgu YTM32_CLOCK_UART0>;
 			ytmicro,functional-clock-source = <YTM32_CLOCK_SRC_FXOSC>;
 			ytmicro,functional-clock-divider = <1>;
 			status = "disabled";
@@ -65,7 +65,7 @@
 			compatible = "ytmicro,ytm32-uart";
 			reg = <0x4001c000 0x1000>;
 			interrupts = <33 0>; 
-			clocks = <&cgu 8>;
+			clocks = <&cgu YTM32_CLOCK_UART1>;
 			ytmicro,functional-clock-source = <YTM32_CLOCK_SRC_FXOSC>;
 			ytmicro,functional-clock-divider = <1>;
 			status = "disabled";
@@ -80,7 +80,7 @@
 			gpio-controller;
 			#gpio-cells = <2>;
 			ngpios = <32>;
-			clocks = <&cgu 1>; /* YTM32_CLOCK_GPIO */
+			clocks = <&cgu YTM32_CLOCK_GPIO>;
 			status = "disabled";
 		};
 
@@ -93,7 +93,7 @@
 			gpio-controller;
 			#gpio-cells = <2>;
 			ngpios = <32>;
-			clocks = <&cgu 1>;
+			clocks = <&cgu YTM32_CLOCK_GPIO>;
 			status = "disabled";
 		};
 
@@ -106,7 +106,7 @@
 			gpio-controller;
 			#gpio-cells = <2>;
 			ngpios = <32>;
-			clocks = <&cgu 1>;
+			clocks = <&cgu YTM32_CLOCK_GPIO>;
 			status = "disabled";
 		};
 
@@ -119,7 +119,7 @@
 			gpio-controller;
 			#gpio-cells = <2>;
 			ngpios = <32>;
-			clocks = <&cgu 1>;
+			clocks = <&cgu YTM32_CLOCK_GPIO>;
 			status = "disabled";
 		};
 
@@ -132,7 +132,7 @@
 			gpio-controller;
 			#gpio-cells = <2>;
 			ngpios = <32>;
-			clocks = <&cgu 1>;
+			clocks = <&cgu YTM32_CLOCK_GPIO>;
 			status = "disabled";
 		};
 

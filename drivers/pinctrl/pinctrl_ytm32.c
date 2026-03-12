@@ -10,6 +10,9 @@
 #include <zephyr/drivers/clock_control.h>
 #include <zephyr/init.h>
 #include "pins_driver.h"
+#include <zephyr/logging/log.h>
+
+LOG_MODULE_REGISTER(pinctrl_ytm32, CONFIG_PINCTRL_LOG_LEVEL);
 
 int pinctrl_configure_pins(const pinctrl_soc_pin_t *pins, uint8_t pin_cnt, uintptr_t reg)
 {
@@ -57,6 +60,9 @@ int pinctrl_configure_pins(const pinctrl_soc_pin_t *pins, uint8_t pin_cnt, uintp
 		default:
 			return -EINVAL;
 		}
+
+		LOG_DBG("pin: port=%u pin=%u mux=%u pull=0x%02x",
+			port, pin, mux, pins[i].pincfg);
 
 		config.base = base;
 		config.pinPortIdx = pin;

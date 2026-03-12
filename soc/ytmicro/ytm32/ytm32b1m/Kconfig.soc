@@ -7,6 +7,7 @@ config SOC_SERIES_YTM32B1M
 	select ARM
 	select CPU_CORTEX_M
 	select CPU_CORTEX_M33
+	select CPU_HAS_ARM_MPU
 	select HAS_SEGGER_RTT if ZEPHYR_SEGGER_MODULE
 
 config SOC_SERIES

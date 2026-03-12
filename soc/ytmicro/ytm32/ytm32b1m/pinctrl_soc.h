@@ -34,10 +34,8 @@ typedef struct pinctrl_soc_pin {
 
 #define YTM32_PULL_UP_MSK       (1U << YTM32_PULL_UP_POS)
 #define YTM32_PULL_DOWN_MSK     (1U << YTM32_PULL_DOWN_POS)
-#define YTM32_PULL_DSB_MSK      (1U << YTM32_PULL_DSB_POS)
 #define YTM32_DRV_STR_MSK       (1U << YTM32_DRV_STR_POS)
 #define YTM32_OPEN_DRAIN_MSK    (1U << YTM32_OPEN_DRAIN_POS)
-#define YTM32_PUSH_PULL_MSK     (1U << YTM32_PUSH_PULL_POS)
 #define YTM32_SLEW_RATE_MSK     (1U << YTM32_SLEW_RATE_POS)
 #define YTM32_PASSIVE_FLT_MSK   (1U << YTM32_PASSIVE_FLT_POS)
 /** @} */

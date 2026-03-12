@@ -17,6 +17,21 @@
 #define YTM32_CLOCK_CONFIG_COUNT 1U
 #define YTM32_CLOCK_CONFIG_INDEX 0U
 
+/*
+ * CMU comparison thresholds for FIRC/FXOSC monitoring:
+ *
+ *   Reference clock: SIRC (32 kHz typical)
+ *   Monitored clocks: FIRC (80 MHz nominal), FXOSC (24 MHz nominal)
+ *
+ * CMU counts 128 reference cycles and compares the monitored clock edges
+ * seen in that window. The vendor SDK expresses the threshold values as
+ * (target_ratio * 128) / 2, so the chosen values map to these windows:
+ *
+ *   FIRC compareHigh = (100 * 128) / 2 = 6400   -> allow up to 100 MHz
+ *   FIRC compareLow  = ( 60 * 128) / 2 = 3840   -> alarm below 60 MHz
+ *   FXOSC compareHigh = (30 * 128) / 2 = 1920   -> allow up to 30 MHz
+ *   FXOSC compareLow  = (18 * 128) / 2 = 1152   -> alarm below 18 MHz
+ */
 static const cmu_config_t ytm32_cmu_config = {
 	.fircClockMonitor = {
 		.enable = YTM32_CMU_ENABLED,
