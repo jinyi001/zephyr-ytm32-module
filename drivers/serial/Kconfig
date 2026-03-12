@@ -3,4 +3,5 @@ config UART_YTM32
     default y
     depends on SERIAL
     select SERIAL_HAS_DRIVER
-    select SERIAL_SUPPORT_INTERRUPT
+    # NOTE: polling-only for now; do NOT select SERIAL_SUPPORT_INTERRUPT
+    # until irq_tx_enable / irq_rx_enable / irq_callback_set are implemented.
