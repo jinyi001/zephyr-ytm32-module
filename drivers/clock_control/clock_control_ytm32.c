@@ -93,20 +93,21 @@ static const struct ytm32_module_clock_config ytm32_fixed_module_clocks[] = {
 #define YTM32_DT_FUNCTIONAL_CLOCK_ENTRY(node_id) \
 	{ \
 		.clock_id = DT_CLOCKS_CELL(node_id, id), \
-		.clk_src = DT_PROP_OR(node_id, ytmicro_functional_clock_source, \
-			YTM32_CLOCK_SRC_DISABLED), \
+		.clk_src = DT_PROP(node_id, ytmicro_functional_clock_source), \
 		.divider = DT_PROP_OR(node_id, ytmicro_functional_clock_divider, 1U), \
 	},
 
-#define YTM32_APPEND_DTS_UART_CLOCK(node_id) \
-	IF_ENABLED(DT_NODE_HAS_COMPAT(node_id, ytmicro_ytm32_uart), \
-		(YTM32_DT_FUNCTIONAL_CLOCK_ENTRY(node_id)))
+#define YTM32_APPEND_DTS_CLOCK_IF_HAS_FUNC_SRC(node_id) \
+	COND_CODE_1(DT_NODE_HAS_PROP(node_id, clocks), \
+		(COND_CODE_1(DT_NODE_HAS_PROP(node_id, ytmicro_functional_clock_source), \
+			(YTM32_DT_FUNCTIONAL_CLOCK_ENTRY(node_id)), ())), ())
 
 static const struct ytm32_module_clock_config ytm32_dts_module_clocks[] = {
-	DT_FOREACH_CHILD_STATUS_OKAY(DT_PATH(soc), YTM32_APPEND_DTS_UART_CLOCK)
+	DT_FOREACH_CHILD_STATUS_OKAY(DT_PATH(soc),
+				     YTM32_APPEND_DTS_CLOCK_IF_HAS_FUNC_SRC)
 };
 
-#undef YTM32_APPEND_DTS_UART_CLOCK
+#undef YTM32_APPEND_DTS_CLOCK_IF_HAS_FUNC_SRC
 #undef YTM32_DT_FUNCTIONAL_CLOCK_ENTRY
 
 static const struct ytm32_module_clock_config *ytm32_find_module_clock(uint32_t clock_id)
@@ -127,36 +128,54 @@ static const struct ytm32_module_clock_config *ytm32_find_module_clock(uint32_t 
 }
 
 
+static const char *const ytm32_clock_labels[] = {
+	[YTM32_CLOCK_DMA] = "dma",
+	[YTM32_CLOCK_GPIO] = "gpio",
+	[YTM32_CLOCK_PCTRLA] = "pctrla",
+	[YTM32_CLOCK_PCTRLB] = "pctrlb",
+	[YTM32_CLOCK_PCTRLC] = "pctrlc",
+	[YTM32_CLOCK_PCTRLD] = "pctrld",
+	[YTM32_CLOCK_PCTRLE] = "pctrle",
+	[YTM32_CLOCK_UART0] = "uart0",
+	[YTM32_CLOCK_UART1] = "uart1",
+	[YTM32_CLOCK_UART2] = "uart2",
+	[YTM32_CLOCK_I2C0] = "i2c0",
+	[YTM32_CLOCK_I2C1] = "i2c1",
+	[YTM32_CLOCK_SPI0] = "spi0",
+	[YTM32_CLOCK_SPI1] = "spi1",
+	[YTM32_CLOCK_SPI2] = "spi2",
+	[YTM32_CLOCK_FLEXCAN0] = "flexcan0",
+	[YTM32_CLOCK_FLEXCAN1] = "flexcan1",
+	[YTM32_CLOCK_ADC0] = "adc0",
+	[YTM32_CLOCK_ACMP0] = "acmp0",
+	[YTM32_CLOCK_TMU] = "tmu",
+	[YTM32_CLOCK_ETMR0] = "etmr0",
+	[YTM32_CLOCK_ETMR1] = "etmr1",
+	[YTM32_CLOCK_MPWM0] = "mpwm0",
+	[YTM32_CLOCK_PTMR0] = "ptmr0",
+	[YTM32_CLOCK_LPTMR0] = "lptmr0",
+	[YTM32_CLOCK_CRC] = "crc",
+	[YTM32_CLOCK_TRNG] = "trng",
+	[YTM32_CLOCK_HCU] = "hcu",
+	[YTM32_CLOCK_WDG0] = "wdg0",
+	[YTM32_CLOCK_EWDG0] = "ewdg0",
+	[YTM32_CLOCK_EMU0] = "emu0",
+	[YTM32_CLOCK_STU] = "stu",
+	[YTM32_CLOCK_CIM] = "cim",
+	[YTM32_CLOCK_SCU] = "scu",
+	[YTM32_CLOCK_CORE] = "core",
+	[YTM32_CLOCK_FAST_BUS] = "fast_bus",
+	[YTM32_CLOCK_SLOW_BUS] = "slow_bus",
+	};
+
 static const char *ytm32_clock_label(uint32_t clock_id)
 {
-	switch (clock_id) {
-	case YTM32_CLOCK_GPIO:
-		return "gpio";
-	case YTM32_CLOCK_PCTRLA:
-		return "pctrla";
-	case YTM32_CLOCK_PCTRLB:
-		return "pctrlb";
-	case YTM32_CLOCK_PCTRLC:
-		return "pctrlc";
-	case YTM32_CLOCK_PCTRLD:
-		return "pctrld";
-	case YTM32_CLOCK_PCTRLE:
-		return "pctrle";
-	case YTM32_CLOCK_UART0:
-		return "uart0";
-	case YTM32_CLOCK_UART1:
-		return "uart1";
-	case YTM32_CLOCK_UART2:
-		return "uart2";
-	case YTM32_CLOCK_CORE:
-		return "core";
-	case YTM32_CLOCK_FAST_BUS:
-		return "fast_bus";
-	case YTM32_CLOCK_SLOW_BUS:
-		return "slow_bus";
-	default:
-		return "unknown";
+	if ((clock_id < ARRAY_SIZE(ytm32_clock_labels)) &&
+	    (ytm32_clock_labels[clock_id] != NULL)) {
+		return ytm32_clock_labels[clock_id];
 	}
+
+	return "unknown";
 }
 
 static bool ytm32_is_supported_module_source(uint32_t clk_src)
