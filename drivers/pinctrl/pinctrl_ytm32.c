@@ -5,6 +5,7 @@
 
 #define DT_DRV_COMPAT ytmicro_ytm32_pinctrl
 
+#include <errno.h>
 #include <zephyr/drivers/pinctrl.h>
 #include <zephyr/drivers/clock_control.h>
 #include <zephyr/init.h>
@@ -96,6 +97,7 @@ int pinctrl_configure_pins(const pinctrl_soc_pin_t *pins, uint8_t pin_cnt, uintp
 static int pinctrl_ytm32_init(void)
 {
 	const struct device *cgu = DEVICE_DT_GET(DT_NODELABEL(cgu));
+	int ret = 0;
 
 	if (!device_is_ready(cgu)) {
 		return -ENODEV;
@@ -106,8 +108,17 @@ static int pinctrl_ytm32_init(void)
 	/* Enable clocks specified in devicetree */
 #if DT_NODE_HAS_PROP(PINCTRL_NODE, clocks)
 #define CLOCK_INIT(node_id, prop, idx) \
-	clock_control_on(cgu, (clock_control_subsys_t)DT_CLOCKS_CELL_BY_IDX(node_id, idx, id));
+	do { \
+		if (ret == 0) { \
+			ret = clock_control_on(cgu, \
+				(clock_control_subsys_t)DT_CLOCKS_CELL_BY_IDX(node_id, idx, id)); \
+		} \
+	} while (0);
 	DT_FOREACH_PROP_ELEM(PINCTRL_NODE, clocks, CLOCK_INIT)
+#undef CLOCK_INIT
+	if (ret < 0) {
+		return ret;
+	}
 #endif
 
 	return 0;

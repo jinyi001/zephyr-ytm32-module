@@ -7,6 +7,12 @@
 #include <zephyr/sys/printk.h>
 #include <errno.h>
 
+#define YTM32_UART0_BASE 0x4001b000U
+#define YTM32_UART1_BASE 0x4001c000U
+#define YTM32_UART2_BASE 0x4001d000U
+#define YTM32_UART3_BASE 0x4001e000U
+#define YTM32_UART_MAX_FUNCTIONAL_CLOCK_HZ 40000000U
+
 /* 规避 Zephyr API 和厂商 HAL API 对 uart_callback_t 命名的冲突 */
 #define uart_callback_t hal_uart_callback_t
 #include "uart_driver.h" /* YTMicro HAL UART header */
@@ -34,10 +40,10 @@ static int uart_ytm32_poll_in(const struct device *dev, unsigned char *c)
 static uint32_t uart_ytm32_get_instance(uint32_t base)
 {
     /* YTM32B1MC0 UART Base Addresses (from Reference Manual / Device Tree) */
-    if (base == 0x4001b000) return 0;
-    if (base == 0x4001c000) return 1;
-    if (base == 0x4001d000) return 2;
-    if (base == 0x4001e000) return 3;
+    if (base == YTM32_UART0_BASE) return 0;
+    if (base == YTM32_UART1_BASE) return 1;
+    if (base == YTM32_UART2_BASE) return 2;
+    if (base == YTM32_UART3_BASE) return 3;
     return 0; /* Default fallback */
 }
 
@@ -88,7 +94,12 @@ static int uart_ytm32_init(const struct device *dev)
         return ret;
     }
 
-    printk("uart%u input clock: %u Hz\n", instance, uart_clk_rate);
+    if ((uart_clk_rate == 0U) ||
+        (uart_clk_rate > YTM32_UART_MAX_FUNCTIONAL_CLOCK_HZ)) {
+        return -EINVAL;
+    }
+
+    printk("uart%u functional clock: %u Hz\n", instance, uart_clk_rate);
 
     ret = pinctrl_apply_state(config->pincfg, PINCTRL_STATE_DEFAULT);
     if (ret < 0) {

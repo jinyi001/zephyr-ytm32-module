@@ -61,6 +61,15 @@ west build -b ytm32b1mc0_evb zephyr-ytm32-module/samples/hello_world
 west build -p -b ytm32b1mc0_evb zephyr-ytm32-module/samples/hello_world
 ```
 
+若要验证 GPIO 兼容层是否已经对齐到标准 Zephyr 用法，建议优先直接构建上游 `blinky` 示例：
+
+```bash
+# 在 zephyrproject 根目录下执行
+west build -b ytm32b1mc0_evb zephyr/samples/basic/blinky
+```
+
+本仓库里的 `zephyr-ytm32-module/samples/blinky` 会保持与上游 `blinky` 相同的逻辑，但主验证目标应以上游示例为准。
+
 ## 烧录与调试
 
 ### 终端输出

@@ -7,3 +7,35 @@ config CLOCK_CONTROL_YTM32
 	depends on DT_HAS_YTMICRO_YTM32_CGU_ENABLED
 	help
 	  Enable support for YTM32 Clock Controller (CGU).
+
+config CLOCK_CONTROL_YTM32_CMU
+	bool "Enable YTM32 CMU monitoring"
+	default y
+	depends on CLOCK_CONTROL_YTM32
+	help
+	  Keep the SCU clock monitor enabled for the fixed FIRC/FXOSC MVP clock
+	  profile. Disable this only on boards that intentionally do not use CMU.
+
+config CLOCK_CONTROL_YTM32_CMU_RESET
+	bool "Reset on YTM32 CMU fault"
+	default y
+	depends on CLOCK_CONTROL_YTM32_CMU
+	help
+	  Reset the SoC when CMU detects FIRC or FXOSC failure. Disable this if the
+	  board wants interrupt-only handling later.
+
+config CLOCK_CONTROL_YTM32_KEEP_SIRC_IN_DEEPSLEEP
+	bool "Keep SIRC enabled in deepsleep"
+	default y
+	depends on CLOCK_CONTROL_YTM32
+	help
+	  Keep SIRC available while entering deepsleep. This matches the current EVB
+	  baseline and keeps room for low-power wakeup and CMU reference usage.
+
+config CLOCK_CONTROL_YTM32_KEEP_SIRC_IN_STANDBY
+	bool "Keep SIRC enabled in standby"
+	default y
+	depends on CLOCK_CONTROL_YTM32
+	help
+	  Keep SIRC available while entering standby. Disable only after validating
+	  board-specific low-power behavior.

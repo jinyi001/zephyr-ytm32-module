@@ -53,4 +53,12 @@
 #define YTM32_CLOCK_FAST_BUS             41U
 #define YTM32_CLOCK_SLOW_BUS             42U
 
+/* IPC functional clock source values mapped from peripheral_clock_source_t */
+#define YTM32_CLOCK_SRC_DISABLED         0U
+#define YTM32_CLOCK_SRC_FIRC             1U
+#define YTM32_CLOCK_SRC_SIRC             2U
+#define YTM32_CLOCK_SRC_FXOSC            3U
+#define YTM32_CLOCK_SRC_LPO              4U
+#define YTM32_CLOCK_SRC_FAST_BUS         7U
+
 #endif /* ZEPHYR_INCLUDE_DT_BINDINGS_CLOCK_YTM32_CLOCK_H_ */

@@ -61,6 +61,15 @@ If you wish to do a pristine build (clearing previous build artifacts), you can 
 west build -p -b ytm32b1mc0_evb zephyr-ytm32-module/samples/hello_world
 ```
 
+To validate the GPIO compatibility layer with the standard Zephyr `blinky` sample, prefer building the upstream sample directly:
+
+```bash
+# From the zephyrproject root directory
+west build -b ytm32b1mc0_evb zephyr/samples/basic/blinky
+```
+
+The local `zephyr-ytm32-module/samples/blinky` sample is kept aligned with the upstream `blinky` logic, but the upstream sample should be treated as the primary bring-up target.
+
 ## Flashing and Debugging
 
 ### Console Output

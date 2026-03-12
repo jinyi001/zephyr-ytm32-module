@@ -4,6 +4,7 @@
  */
 
 #include <arm/armv8-m.dtsi>
+#include <zephyr/dt-bindings/clock/ytmicro,ytm32-clock.h>
 
 / {
 	model = "YTMicro YTM32B1MC0";
@@ -55,6 +56,8 @@
 			reg = <0x4001b000 0x1000>;
 			interrupts = <31 0>;
 			clocks = <&cgu 7>;
+			ytmicro,functional-clock-source = <YTM32_CLOCK_SRC_FXOSC>;
+			ytmicro,functional-clock-divider = <1>;
 			status = "disabled";
 		};
 
@@ -63,6 +66,8 @@
 			reg = <0x4001c000 0x1000>;
 			interrupts = <33 0>; 
 			clocks = <&cgu 8>;
+			ytmicro,functional-clock-source = <YTM32_CLOCK_SRC_FXOSC>;
+			ytmicro,functional-clock-divider = <1>;
 			status = "disabled";
 		};
 

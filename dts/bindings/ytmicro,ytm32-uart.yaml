@@ -11,6 +11,20 @@ properties:
     type: phandle-array
     required: true
     description: UART peripheral clock specifier from the CGU.
+  ytmicro,functional-clock-source:
+    type: int
+    required: true
+    description: |
+      IPC functional clock source selection for this UART.
+      Use `YTM32_CLOCK_SRC_*` values from
+      `zephyr/dt-bindings/clock/ytmicro,ytm32-clock.h`.
+  ytmicro,functional-clock-divider:
+    type: int
+    required: false
+    default: 1
+    description: |
+      UART IPC functional clock divider expressed as the hardware divide value.
+      Valid range is 1 to 16.
   pinctrl-0:
     type: phandles
     required: false

@@ -10,6 +10,7 @@
 #include <zephyr/drivers/clock_control.h>
 #include <zephyr/irq.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/sys/printk.h>
 
 LOG_MODULE_REGISTER(gpio_ytm32, CONFIG_GPIO_LOG_LEVEL);
 
@@ -307,6 +308,8 @@ static DEVICE_API(gpio, gpio_ytm32_api) = {
 static int gpio_ytm32_init(const struct device *dev)
 {
 	const struct gpio_ytm32_config *cfg = dev->config;
+	uint32_t clock_rate;
+	int ret;
 
 	/* Enable GPIO peripheral clock */
 	if (cfg->clk_dev != NULL) {
@@ -314,8 +317,21 @@ static int gpio_ytm32_init(const struct device *dev)
 			LOG_ERR("Clock device not ready");
 			return -ENODEV;
 		}
-		clock_control_on(cfg->clk_dev,
-				 (clock_control_subsys_t)(uintptr_t)cfg->clk_id);
+		ret = clock_control_on(cfg->clk_dev,
+				       (clock_control_subsys_t)(uintptr_t)cfg->clk_id);
+		if (ret < 0) {
+			return ret;
+		}
+
+		ret = clock_control_get_rate(cfg->clk_dev,
+				       (clock_control_subsys_t)(uintptr_t)cfg->clk_id,
+				       &clock_rate);
+		if (ret < 0) {
+			return ret;
+		}
+
+		printk("%s functional clock: %u Hz\n", dev->name, clock_rate);
+		LOG_INF("%s functional clock: %u Hz", dev->name, clock_rate);
 	}
 
 	cfg->irq_config_func(dev);

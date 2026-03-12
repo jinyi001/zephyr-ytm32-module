@@ -41,7 +41,8 @@
     status = "okay";
     core-clock = <80000000>;
     core-divider = <1>;
-    bus-divider = <2>;
+    fast-bus-divider = <1>;
+    slow-bus-divider = <2>;
 };
 
 &pinctrl {
@@ -70,6 +71,8 @@
 &uart1 {
     status = "okay";
     current-speed = <115200>;
+    ytmicro,functional-clock-source = <YTM32_CLOCK_SRC_FXOSC>;
+    ytmicro,functional-clock-divider = <1>;
     pinctrl-0 = <&uart1_default>;
     pinctrl-names = "default";
 };

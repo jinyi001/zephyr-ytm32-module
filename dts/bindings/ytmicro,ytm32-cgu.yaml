@@ -21,13 +21,30 @@ properties:
     description: |
       Divider for the core clock relative to the system oscillator/PLL.
       Valid values depend on the specific SoC (e.g., 1, 2, 4...).
-      
+
+  fast-bus-divider:
+    type: int
+    required: false
+    default: 1
+    description: |
+      Divider for the fast bus clock relative to the selected system clock.
+      MVP-3 keeps the FIRC profile fixed and currently supports fast bus
+      divider 1 only.
+
+  slow-bus-divider:
+    type: int
+    required: false
+    description: |
+      Divider for the slow bus clock relative to the selected system clock.
+      This is the preferred property for YTM32 SCU bus clock description.
+
   bus-divider:
     type: int
-    required: true
+    required: false
+    deprecated: true
     description: |
-      Divider for the bus clock relative to the system oscillator/PLL.
-      Valid values depend on the specific SoC (e.g., 1, 2, 4...).
+      Legacy alias for `slow-bus-divider`.
+      Keep this only for transition from the early single-bus model.
 
 clock-cells:
   - id

@@ -33,6 +33,13 @@ Here is an example for the :zephyr:code-sample:`hello_world` application.
    :board: ytm32b1mc0_evb
    :goals: flash
 
+Here is an example for the :zephyr:code-sample:`blinky` application.
+
+.. zephyr-app-commands::
+   :zephyr-app: samples/basic/blinky
+   :board: ytm32b1mc0_evb
+   :goals: flash
+
 Debugging
 =========
 
