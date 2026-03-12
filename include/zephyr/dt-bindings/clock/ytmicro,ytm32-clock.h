@@ -61,4 +61,8 @@
 #define YTM32_CLOCK_SRC_LPO              4U
 #define YTM32_CLOCK_SRC_FAST_BUS         7U
 
+/* Fixed oscillator frequencies (Hz) */
+#define YTM32_FIRC_HZ                    80000000U
+#define YTM32_FXOSC_HZ                   24000000U
+
 #endif /* ZEPHYR_INCLUDE_DT_BINDINGS_CLOCK_YTM32_CLOCK_H_ */
