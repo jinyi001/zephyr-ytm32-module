@@ -7,6 +7,10 @@ properties:
     required: true
   interrupts:
     required: true
+  clocks:
+    type: phandle-array
+    required: true
+    description: UART peripheral clock specifier from the CGU.
   pinctrl-0:
     type: phandles
     required: false

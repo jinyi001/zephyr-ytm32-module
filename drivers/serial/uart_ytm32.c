@@ -4,6 +4,7 @@
 #include <zephyr/device.h>
 #include <zephyr/drivers/clock_control.h>
 #include <zephyr/drivers/pinctrl.h>
+#include <zephyr/sys/printk.h>
 #include <errno.h>
 
 /* 规避 Zephyr API 和厂商 HAL API 对 uart_callback_t 命名的冲突 */
@@ -68,6 +69,7 @@ static int uart_ytm32_init(const struct device *dev)
     const struct uart_ytm32_config *config = dev->config;
     struct uart_ytm32_data *data = dev->data;
     uint32_t instance = uart_ytm32_get_instance(config->base);
+    uint32_t uart_clk_rate;
 
     uart_user_config_t hal_config;
 
@@ -80,6 +82,13 @@ static int uart_ytm32_init(const struct device *dev)
     if (ret < 0) {
         return ret;
     }
+
+    ret = clock_control_get_rate(config->clock_dev, config->clock_subsys, &uart_clk_rate);
+    if (ret < 0) {
+        return ret;
+    }
+
+    printk("uart%u input clock: %u Hz\n", instance, uart_clk_rate);
 
     ret = pinctrl_apply_state(config->pincfg, PINCTRL_STATE_DEFAULT);
     if (ret < 0) {

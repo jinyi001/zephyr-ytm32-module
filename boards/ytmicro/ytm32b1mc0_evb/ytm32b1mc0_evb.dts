@@ -39,7 +39,7 @@
 
 &cgu {
     status = "okay";
-    core-clock = <120000000>;
+    core-clock = <80000000>;
     core-divider = <1>;
     bus-divider = <2>;
 };

@@ -11,8 +11,12 @@ LOG_MODULE_REGISTER(clock_control_ytm32, CONFIG_CLOCK_CONTROL_LOG_LEVEL);
 #include <zephyr/device.h>
 #include <zephyr/arch/cpu.h>
 
+#define YTM32_STATUS_SUCCESS 0
+#define YTM32_FIRC_HZ 80000000U
+
 /* Forward declare vendor API to avoid pulling in conflicting vendor CMSIS headers */
 extern void CLOCK_DRV_SetModuleClock(uint32_t clockName, bool clockGate, uint32_t clkSrc, uint32_t divider);
+extern int CLOCK_SYS_GetFreq(uint32_t clockName, uint32_t *frequency);
 
 struct clock_control_ytm32_config {
 	uint32_t core_clock;
@@ -62,19 +66,19 @@ static int clock_control_ytm32_on(const struct device *dev, clock_control_subsys
 
 static int clock_control_ytm32_get_rate(const struct device *dev, clock_control_subsys_t sys, uint32_t *rate)
 {
-	const struct clock_control_ytm32_config *cfg = dev->config;
 	uint32_t clock_id = (uint32_t)(uintptr_t)sys;
+	int status;
 
-	/*
-	 * MVP get_rate implementation:
-	 * Return the configured core_clock or bus_clock based on the requested sys ID.
-	 * For now, returning the core_clock for everything, or core_clock / bus_divider.
-	 */
-	if (clock_id >= 7 && clock_id <= 9) {
-		/* Assuming UART uses bus clock or a fixed frequency */
-		*rate = cfg->core_clock / cfg->bus_divider;
-	} else {
-		*rate = cfg->core_clock;
+	(void)dev;
+
+	if (rate == NULL) {
+		return -EINVAL;
+	}
+
+	status = CLOCK_SYS_GetFreq(clock_id, rate);
+	if (status != YTM32_STATUS_SUCCESS) {
+		LOG_ERR("Failed to query clock id %u (status %d)", clock_id, status);
+		return -EIO;
 	}
 
 	return 0;
@@ -90,13 +94,15 @@ static int clock_control_ytm32_init(const struct device *dev)
 {
 	const struct clock_control_ytm32_config *cfg = dev->config;
 
-	/* 
-	 * TODO: Add the actual call to CLOCK_DRV_Init() or similar from vendor SDK 
-	 * here to initialize PLLs using cfg->core_clock and dividers.
-	 * Currently just logging it as MVP.
-	 */
+	if (cfg->core_clock != YTM32_FIRC_HZ) {
+		LOG_ERR("Unsupported core clock %u Hz, MVP supports %u Hz FIRC only",
+			cfg->core_clock, YTM32_FIRC_HZ);
+		return -EINVAL;
+	}
+
 	LOG_INF("YTM32 CGU Initialized, Target Core Clock: %u Hz", cfg->core_clock);
 	LOG_INF("Core Divider: %u, Bus Divider: %u", cfg->core_divider, cfg->bus_divider);
+	LOG_INF("YTM32 clock MVP locked to FIRC 80MHz baseline");
 	return 0;
 }
 
