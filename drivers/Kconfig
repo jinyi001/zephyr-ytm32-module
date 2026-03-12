@@ -1,3 +1,4 @@
 rsource "serial/Kconfig"
 rsource "clock_control/Kconfig"
 rsource "pinctrl/Kconfig"
+rsource "gpio/Kconfig"

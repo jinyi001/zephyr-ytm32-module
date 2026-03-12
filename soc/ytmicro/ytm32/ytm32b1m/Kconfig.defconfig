@@ -12,4 +12,13 @@ config SYS_CLOCK_HW_CYCLES_PER_SEC
 config CORTEX_M_SYSTICK
 	default y
 
+# YTM32 has ECC-protected SRAM that must be written before any read.
+# soc_early_reset_hook fills all 32KB RAM before stack/C code runs.
+config SOC_EARLY_RESET_HOOK
+	default y
+
+# Run SystemInit() to disable watchdog and configure flash.
+config SOC_EARLY_INIT_HOOK
+	default y
+
 endif # SOC_SERIES_YTM32B1M

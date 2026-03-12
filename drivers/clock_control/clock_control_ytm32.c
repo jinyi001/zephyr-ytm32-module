@@ -42,12 +42,16 @@ static int clock_control_ytm32_on(const struct device *dev, clock_control_subsys
 	 * For now, just a placeholder lookup based on clock_id.
 	 */
 	if (clock_id >= 7 && clock_id <= 9) {
-		/* Example: UART0-2 uses FIRC (assuming FIRC is src 1) */
-		clk_src = 1;
+		/* UART0-2: uses FIRC as clock source */
+		clk_src = 1; /* FIRC */
 		divider = 0;
 	} else if (clock_id >= 2 && clock_id <= 6) {
-		/* PCTRL A-E */
-		clk_src = 3;
+		/* PCTRL A-E: uses FXOSC */
+		clk_src = 3; /* FXOSC */
+		divider = 0;
+	} else if (clock_id == 1) {
+		/* GPIO: uses FIRC (matching vendor demo clock_config) */
+		clk_src = 1; /* FIRC */
 		divider = 0;
 	}
 

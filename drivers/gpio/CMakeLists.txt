@@ -1,0 +1,7 @@
+# Copyright (c) 2026 YI JIN <jinyi_2001@foxmail.com>
+# SPDX-License-Identifier: Apache-2.0
+
+if(CONFIG_GPIO_YTM32)
+zephyr_library()
+zephyr_library_sources(gpio_ytm32.c)
+endif()

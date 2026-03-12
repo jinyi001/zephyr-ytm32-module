@@ -1,0 +1,34 @@
+# Copyright (c) 2026 YI JIN <jinyi_2001@foxmail.com>
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  YTMicro YTM32 GPIO controller.
+
+  The YTM32 has separate GPIO (data/direction/interrupt) and PCTRL (pin mux)
+  peripherals. The reg property should contain two entries:
+    - First: GPIO register block (e.g., GPIOA at 0x40011000)
+    - Second: PCTRL register block (e.g., PCTRLA at 0x40012000)
+
+compatible: "ytmicro,ytm32-gpio"
+
+include: [gpio-controller.yaml, base.yaml]
+
+properties:
+  reg:
+    required: true
+
+  interrupts:
+    required: true
+
+  clocks:
+    required: true
+
+  "#gpio-cells":
+    const: 2
+
+  ngpios:
+    default: 32
+
+gpio-cells:
+  - pin
+  - flags

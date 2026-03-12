@@ -8,6 +8,7 @@ if(CONFIG_SOC_YTM32B1MC0)
 endif()
 
 zephyr_sources(soc.c)
+zephyr_sources(soc_reset.S)
 
 # Workaround for Zephyr not passing +nofp or -mfloat-abi=soft for Cortex-M33 without FPU
 if(NOT CONFIG_CPU_HAS_FPU)

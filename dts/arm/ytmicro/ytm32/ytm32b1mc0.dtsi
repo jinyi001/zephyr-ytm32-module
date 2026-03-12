@@ -66,6 +66,71 @@
 			status = "disabled";
 		};
 
+		gpioa: gpio@40011000 {
+			compatible = "ytmicro,ytm32-gpio";
+			reg = <0x40011000 0x100>,  /* GPIO */
+			      <0x40012000 0x100>;  /* PCTRLA */
+			reg-names = "gpio", "pctrl";
+			interrupts = <59 0>;
+			gpio-controller;
+			#gpio-cells = <2>;
+			ngpios = <32>;
+			clocks = <&cgu 1>; /* YTM32_CLOCK_GPIO */
+			status = "disabled";
+		};
+
+		gpiob: gpio@40011100 {
+			compatible = "ytmicro,ytm32-gpio";
+			reg = <0x40011100 0x100>,  /* GPIO */
+			      <0x40013000 0x100>;  /* PCTRLB */
+			reg-names = "gpio", "pctrl";
+			interrupts = <60 0>;
+			gpio-controller;
+			#gpio-cells = <2>;
+			ngpios = <32>;
+			clocks = <&cgu 1>;
+			status = "disabled";
+		};
+
+		gpioc: gpio@40011200 {
+			compatible = "ytmicro,ytm32-gpio";
+			reg = <0x40011200 0x100>,  /* GPIO */
+			      <0x40014000 0x100>;  /* PCTRLC */
+			reg-names = "gpio", "pctrl";
+			interrupts = <61 0>;
+			gpio-controller;
+			#gpio-cells = <2>;
+			ngpios = <32>;
+			clocks = <&cgu 1>;
+			status = "disabled";
+		};
+
+		gpiod: gpio@40011300 {
+			compatible = "ytmicro,ytm32-gpio";
+			reg = <0x40011300 0x100>,  /* GPIO */
+			      <0x40015000 0x100>;  /* PCTRLD */
+			reg-names = "gpio", "pctrl";
+			interrupts = <62 0>;
+			gpio-controller;
+			#gpio-cells = <2>;
+			ngpios = <32>;
+			clocks = <&cgu 1>;
+			status = "disabled";
+		};
+
+		gpioe: gpio@40011400 {
+			compatible = "ytmicro,ytm32-gpio";
+			reg = <0x40011400 0x100>,  /* GPIO */
+			      <0x40016000 0x100>;  /* PCTRLE */
+			reg-names = "gpio", "pctrl";
+			interrupts = <63 0>;
+			gpio-controller;
+			#gpio-cells = <2>;
+			ngpios = <32>;
+			clocks = <&cgu 1>;
+			status = "disabled";
+		};
+
 	};
 };
 
