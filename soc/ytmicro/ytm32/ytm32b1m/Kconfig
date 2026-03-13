@@ -3,5 +3,6 @@
 
 if SOC_SERIES_YTM32B1M
 
+	# Reserved for future series-wide options shared by all YTM32B1M SoCs.
 
 endif # SOC_SERIES_YTM32B1M

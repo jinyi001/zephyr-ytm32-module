@@ -1,0 +1,6 @@
+config INTC_YTM32
+	bool "YTMicro YTM32 interrupt controller support"
+	default y
+	depends on SOC_FAMILY_YTMICRO_YTM32
+	help
+	  Enable the YTM32 interrupt controller glue driver.

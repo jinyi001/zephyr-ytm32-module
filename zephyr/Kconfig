@@ -1,1 +1,4 @@
+# Driver options are routed from the module Kconfig entry point.
+# SoC and board Kconfig trees are registered separately through
+# zephyr/module.yml via soc_root and board_root.
 rsource "../drivers/Kconfig"

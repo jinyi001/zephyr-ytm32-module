@@ -4,6 +4,7 @@
 config PINCTRL_YTM32
 	bool "YTM32 pin controller driver"
 	default y
+	depends on HAS_YTMICRO_HAL
 	depends on DT_HAS_YTMICRO_YTM32_PINCTRL_ENABLED
 	help
 	  Enable the YTM32 pin controller driver.

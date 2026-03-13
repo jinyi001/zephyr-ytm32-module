@@ -4,7 +4,8 @@
 config GPIO_YTM32
 	bool "YTMicro YTM32 GPIO driver"
 	default y
+	depends on GPIO
+	depends on HAS_YTMICRO_HAL
 	depends on DT_HAS_YTMICRO_YTM32_GPIO_ENABLED
-	select GPIO
 	help
 	  Enable GPIO driver for YTMicro YTM32 series MCUs.

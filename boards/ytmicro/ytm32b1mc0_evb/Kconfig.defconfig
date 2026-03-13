@@ -3,4 +3,6 @@
 
 if BOARD_YTM32B1MC0_EVB
 
+	# Reserved for future board-specific default overrides.
+
 endif # BOARD_YTM32B1MC0_EVB

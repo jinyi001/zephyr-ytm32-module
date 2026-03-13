@@ -1,5 +1,5 @@
 add_subdirectory_ifdef(CONFIG_SERIAL serial)
 add_subdirectory_ifdef(CONFIG_CLOCK_CONTROL clock_control)
 add_subdirectory(pinctrl)
-add_subdirectory(interrupt_controller)
+add_subdirectory_ifdef(CONFIG_INTC_YTM32 interrupt_controller)
 add_subdirectory_ifdef(CONFIG_GPIO gpio)
