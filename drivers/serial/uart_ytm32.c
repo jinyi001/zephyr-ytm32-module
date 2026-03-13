@@ -56,11 +56,15 @@ struct uart_ytm32_data {
 
 static int uart_ytm32_poll_in(const struct device *dev, unsigned char *c)
 {
-	ARG_UNUSED(dev);
-	ARG_UNUSED(c);
+	const struct uart_ytm32_config *config = dev->config;
+	UART_Type *base = (UART_Type *)config->base;
 
-	/* MVP 阶段先不管输入 */
-	return -1;
+	if (!UART_GetStatusFlag(base, UART_RX_DATA_REG_FULL)) {
+		return -1;
+	}
+
+	UART_Getchar8(base, c);
+	return 0;
 }
 
 static void uart_ytm32_poll_out(const struct device *dev, unsigned char c)

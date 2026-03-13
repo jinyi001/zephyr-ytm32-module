@@ -5,109 +5,109 @@
 
 #include <zephyr/toolchain.h>
 #include <zephyr/init.h>
+
 #include "interrupt_manager.h"
+
+#include <zephyr/irq.h>
 
 /* --- Vendor HAL Interrupt Manager Overrides --- */
 
 /*
- * WARNING: Known limitation
- *
- * This global interrupt disable counter is maintained independently from
- * Zephyr's irq_lock()/irq_unlock() nesting. If vendor HAL code calls
- * INT_SYS_DisableIRQGlobal() while a Zephyr driver holds irq_lock(),
- * the two counters will diverge. In practice this is safe because:
- *
- * 1. Zephyr drivers use irq_lock(), not INT_SYS_DisableIRQGlobal().
- * 2. Vendor HAL init functions may call
- *    INT_SYS_DisableIRQGlobal()/INT_SYS_EnableIRQGlobal() in matched pairs.
- *
- * If future HAL usage breaks this assumption, consider replacing this
- * counter with a wrapper around Zephyr's irq_lock()/irq_unlock().
+ * Keep vendor-style global IRQ nesting aligned with Zephyr's irq_lock()
+ * semantics. The first disable captures the current Zephyr IRQ lock key and
+ * the final enable restores exactly that outer state instead of blindly
+ * unmasking interrupts.
  */
 static int32_t g_interruptDisableCount = 0;
+static unsigned int g_interruptLockKey;
 
-void INT_SYS_InstallHandler(IRQn_Type irqNumber, isr_t newHandler, isr_t *oldHandler)
+void INT_SYS_InstallHandler(IRQn_Type irqNumber, isr_t newHandler,
+			    isr_t *oldHandler)
 {
-    /* 
-     * In Zephyr, interrupts are managed via IRQ_CONNECT in drivers.
-     * We override this vendor HAL function to prevent it from modifying
-     * the vector table (VTOR), which is in Flash and would cause a Bus Fault.
-     */
-    ARG_UNUSED(irqNumber);
-    ARG_UNUSED(newHandler);
-    ARG_UNUSED(oldHandler);
+	/*
+	 * In Zephyr, interrupts are managed via IRQ_CONNECT in drivers.
+	 * We override this vendor HAL function to prevent it from modifying
+	 * the vector table (VTOR), which is in Flash and would cause a Bus Fault.
+	 */
+	ARG_UNUSED(irqNumber);
+	ARG_UNUSED(newHandler);
+
+	if (oldHandler != NULL) {
+		*oldHandler = NULL;
+	}
 }
 
 void INT_SYS_EnableIRQ(IRQn_Type irqNumber)
 {
-    NVIC_EnableIRQ(irqNumber);
+	NVIC_EnableIRQ(irqNumber);
 }
 
 void INT_SYS_DisableIRQ(IRQn_Type irqNumber)
 {
-    NVIC_DisableIRQ(irqNumber);
+	NVIC_DisableIRQ(irqNumber);
 }
 
 void INT_SYS_EnableIRQGlobal(void)
 {
-    if (g_interruptDisableCount > 0)
-    {
-        g_interruptDisableCount--;
-        if (g_interruptDisableCount <= 0)
-        {
-            __enable_irq();
-        }
-    }
+	if (g_interruptDisableCount > 0) {
+		g_interruptDisableCount--;
+		if (g_interruptDisableCount == 0) {
+			irq_unlock(g_interruptLockKey);
+		}
+	}
 }
 
 void INT_SYS_DisableIRQGlobal(void)
 {
-    __disable_irq();
-    g_interruptDisableCount++;
+	if (g_interruptDisableCount == 0) {
+		g_interruptLockKey = irq_lock();
+	}
+
+	g_interruptDisableCount++;
 }
 
 void INT_SYS_SetPriority(IRQn_Type irqNumber, uint8_t priority)
 {
-    NVIC_SetPriority(irqNumber, priority);
+	NVIC_SetPriority(irqNumber, priority);
 }
 
 uint8_t INT_SYS_GetPriority(IRQn_Type irqNumber)
 {
-    return (uint8_t)NVIC_GetPriority(irqNumber);
+	return (uint8_t)NVIC_GetPriority(irqNumber);
 }
 
 #if FEATURE_INTERRUPT_HAS_PENDING_STATE
 void INT_SYS_ClearPending(IRQn_Type irqNumber)
 {
-    NVIC_ClearPendingIRQ(irqNumber);
+	NVIC_ClearPendingIRQ(irqNumber);
 }
 
 void INT_SYS_SetPending(IRQn_Type irqNumber)
 {
-    NVIC_SetPendingIRQ(irqNumber);
+	NVIC_SetPendingIRQ(irqNumber);
 }
 
 uint32_t INT_SYS_GetPending(IRQn_Type irqNumber)
 {
-    return NVIC_GetPendingIRQ(irqNumber);
+	return NVIC_GetPendingIRQ(irqNumber);
 }
 #endif /* FEATURE_INTERRUPT_HAS_PENDING_STATE */
 
 #if FEATURE_INTERRUPT_HAS_ACTIVE_STATE
 uint32_t INT_SYS_GetActive(IRQn_Type irqNumber)
 {
-    return NVIC_GetActive(irqNumber);
+	return NVIC_GetActive(irqNumber);
 }
 #endif /* FEATURE_INTERRUPT_HAS_ACTIVE_STATE */
 
 static int intc_ytm32_init(void)
 {
-    /* 
-     * The stubs above replace the need for the vendor HAL interrupt_manager.c.
-     * Nothing else needs to be initialized here as Zephyr's standard ARM NVIC
-     * code handles actual interrupt routing and enablement.
-     */
-    return 0;
+	/*
+	 * The stubs above replace the need for the vendor HAL interrupt_manager.c.
+	 * Nothing else needs to be initialized here as Zephyr's standard ARM NVIC
+	 * code handles actual interrupt routing and enablement.
+	 */
+	return 0;
 }
 
 SYS_INIT(intc_ytm32_init, PRE_KERNEL_1, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT);
