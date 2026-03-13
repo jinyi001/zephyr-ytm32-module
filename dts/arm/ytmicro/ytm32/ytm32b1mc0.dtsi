@@ -71,6 +71,15 @@
 			status = "disabled";
 		};
 
+		wdog0: watchdog@4006a000 {
+			compatible = "ytmicro,ytm32-wdg";
+			reg = <0x4006a000 0x1000>;
+			interrupts = <22 0>;
+			clocks = <&cgu YTM32_CLOCK_WDG0>;
+			ytmicro,timeout-clock-source = <0>;
+			status = "disabled";
+		};
+
 		gpioa: gpio@40011000 {
 			compatible = "ytmicro,ytm32-gpio";
 			reg = <0x40011000 0x100>,  /* GPIO */

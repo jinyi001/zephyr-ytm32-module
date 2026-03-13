@@ -1,0 +1,23 @@
+description: YTMicro YTM32 watchdog
+compatible: "ytmicro,ytm32-wdg"
+include: base.yaml
+
+properties:
+  reg:
+    required: true
+  interrupts:
+    required: false
+  clocks:
+    type: phandle-array
+    required: true
+    description: Watchdog peripheral clock specifier from the CGU.
+  ytmicro,timeout-clock-source:
+    type: int
+    required: false
+    default: 0
+    enum:
+      - 0
+      - 1
+    description: |
+      Watchdog counter clock source.
+      0 selects the 32 kHz LPO and 1 selects the 2 MHz SIRC.
