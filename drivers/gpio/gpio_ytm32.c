@@ -84,6 +84,7 @@ struct gpio_ytm32_data {
 	/* gpio_driver_data needs to be first */
 	struct gpio_driver_data common;
 	sys_slist_t callbacks;
+	uint8_t irqc_cache[32];
 };
 
 static inline uint32_t gpio_reg_read(uintptr_t base, uint32_t offset)
@@ -164,6 +165,8 @@ static int gpio_ytm32_configure(const struct device *dev,
 		pier = gpio_reg_read(base, GPIO_PIER_OFFSET);
 		if ((flags & GPIO_INPUT) != 0) {
 			pier |= BIT(pin);
+		} else {
+			pier &= ~BIT(pin);
 		}
 		gpio_reg_write(base, GPIO_PIER_OFFSET, pier);
 	} else if ((flags & GPIO_INPUT) != 0) {
@@ -235,29 +238,58 @@ static int gpio_ytm32_pin_interrupt_configure(const struct device *dev,
 					      enum gpio_int_trig trig)
 {
 	const struct gpio_ytm32_config *cfg = dev->config;
+	struct gpio_ytm32_data *data = dev->data;
 	uintptr_t base = cfg->base;
 	uint32_t pcr;
-	uint32_t irqc;
+	uint32_t irqc = IRQC_DISABLED;
+	bool clear_pending = true;
+#ifdef CONFIG_GPIO_ENABLE_DISABLE_INTERRUPT
+	bool fire_pending = false;
+	gpio_port_pins_t pending = 0U;
+#endif
 
-	if (mode == GPIO_INT_MODE_DISABLED) {
-		irqc = IRQC_DISABLED;
-	} else if (mode == GPIO_INT_MODE_LEVEL) {
-		if (trig == GPIO_INT_TRIG_LOW) {
-			irqc = IRQC_INT_LOGIC_ZERO;
-		} else if (trig == GPIO_INT_TRIG_HIGH) {
-			irqc = IRQC_INT_LOGIC_ONE;
-		} else {
-			/* Both-level not supported */
-			return -ENOTSUP;
+	trig &= ~GPIO_INT_WAKEUP;
+
+#ifdef CONFIG_GPIO_ENABLE_DISABLE_INTERRUPT
+	if (mode == GPIO_INT_MODE_DISABLE_ONLY) {
+		clear_pending = false;
+	} else if (mode == GPIO_INT_MODE_ENABLE_ONLY) {
+		irqc = data->irqc_cache[pin];
+		if (irqc == IRQC_DISABLED) {
+			return 0;
 		}
-	} else {
-		/* Edge mode */
-		if (trig == GPIO_INT_TRIG_LOW) {
-			irqc = IRQC_INT_FALLING;
-		} else if (trig == GPIO_INT_TRIG_HIGH) {
-			irqc = IRQC_INT_RISING;
-		} else {
-			irqc = IRQC_INT_EITHER;
+		clear_pending = false;
+		fire_pending = true;
+	} else
+#endif
+	{
+		switch (mode) {
+		case GPIO_INT_MODE_DISABLED:
+			data->irqc_cache[pin] = IRQC_DISABLED;
+			break;
+		case GPIO_INT_MODE_LEVEL:
+			if (trig == GPIO_INT_TRIG_LOW) {
+				irqc = IRQC_INT_LOGIC_ZERO;
+			} else if (trig == GPIO_INT_TRIG_HIGH) {
+				irqc = IRQC_INT_LOGIC_ONE;
+			} else {
+				/* Both-level not supported */
+				return -ENOTSUP;
+			}
+			data->irqc_cache[pin] = irqc;
+			break;
+		case GPIO_INT_MODE_EDGE:
+			if (trig == GPIO_INT_TRIG_LOW) {
+				irqc = IRQC_INT_FALLING;
+			} else if (trig == GPIO_INT_TRIG_HIGH) {
+				irqc = IRQC_INT_RISING;
+			} else {
+				irqc = IRQC_INT_EITHER;
+			}
+			data->irqc_cache[pin] = irqc;
+			break;
+		default:
+			return -ENOTSUP;
 		}
 	}
 
@@ -267,10 +299,28 @@ static int gpio_ytm32_pin_interrupt_configure(const struct device *dev,
 	pcr |= (irqc << GPIO_PCR_IRQC_SHIFT) & GPIO_PCR_IRQC_MASK;
 	sys_write32(pcr, base + GPIO_PCR_OFFSET + pin * PCR_REG_STRIDE);
 
-	/* Clear any pending flag */
-	gpio_reg_write(base, GPIO_PIFR_OFFSET, BIT(pin));
+	if (clear_pending) {
+		gpio_reg_write(base, GPIO_PIFR_OFFSET, BIT(pin));
+	}
+
+#ifdef CONFIG_GPIO_ENABLE_DISABLE_INTERRUPT
+	if (fire_pending) {
+		pending = gpio_reg_read(base, GPIO_PIFR_OFFSET) & BIT(pin);
+		if (pending != 0U) {
+			gpio_reg_write(base, GPIO_PIFR_OFFSET, pending);
+			gpio_fire_callbacks(&data->callbacks, dev, pending);
+		}
+	}
+#endif
 
 	return 0;
+}
+
+static uint32_t gpio_ytm32_get_pending_int(const struct device *dev)
+{
+	const struct gpio_ytm32_config *cfg = dev->config;
+
+	return gpio_reg_read(cfg->base, GPIO_PIFR_OFFSET);
 }
 
 static int gpio_ytm32_manage_callback(const struct device *dev,
@@ -326,6 +376,7 @@ static DEVICE_API(gpio, gpio_ytm32_api) = {
 	.port_toggle_bits = gpio_ytm32_port_toggle_bits,
 	.pin_interrupt_configure = gpio_ytm32_pin_interrupt_configure,
 	.manage_callback = gpio_ytm32_manage_callback,
+	.get_pending_int = gpio_ytm32_get_pending_int,
 #ifdef CONFIG_GPIO_GET_DIRECTION
 	.port_get_direction = gpio_ytm32_port_get_direction,
 #endif

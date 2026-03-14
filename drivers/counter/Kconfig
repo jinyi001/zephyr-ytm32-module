@@ -1,0 +1,11 @@
+# Copyright (c) 2026 YI JIN <jinyi_2001@foxmail.com>
+# SPDX-License-Identifier: Apache-2.0
+
+config COUNTER_YTM32_LPTMR
+	bool "YTMicro YTM32 LPTMR counter driver"
+	default y
+	depends on COUNTER
+	depends on HAS_YTMICRO_HAL
+	depends on DT_HAS_YTMICRO_YTM32_LPTMR_ENABLED
+	help
+	  Enable the MVP counter driver for YTMicro YTM32 LPTMR0.

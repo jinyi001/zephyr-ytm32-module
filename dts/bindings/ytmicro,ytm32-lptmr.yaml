@@ -1,0 +1,33 @@
+description: YTMicro YTM32 low-power timer counter
+
+compatible: "ytmicro,ytm32-lptmr"
+
+include: base.yaml
+
+properties:
+  reg:
+    required: true
+
+  interrupts:
+    required: true
+
+  clocks:
+    type: phandle-array
+    required: true
+    description: LPTMR peripheral clock specifier from the CGU.
+
+  ytmicro,functional-clock-source:
+    type: int
+    required: true
+    description: |
+      Functional clock source selection for this LPTMR.
+      Use `YTM32_CLOCK_SRC_*` values from
+      `zephyr/dt-bindings/clock/ytmicro,ytm32-clock.h`.
+
+  ytmicro,functional-clock-divider:
+    type: int
+    required: false
+    default: 1
+    description: |
+      LPTMR functional clock divider expressed as the hardware divide value.
+      Valid range is 1 to 16.
