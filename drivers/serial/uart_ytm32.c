@@ -52,32 +52,13 @@ struct uart_ytm32_config {
 
 struct uart_ytm32_data {
 	uart_state_t hal_state;
+	int errors;
 };
 
-static int uart_ytm32_poll_in(const struct device *dev, unsigned char *c)
-{
-	ARG_UNUSED(dev);
-	ARG_UNUSED(c);
-
-	/* MVP 阶段先不管输入 */
-	return -1;
-}
-
-static void uart_ytm32_poll_out(const struct device *dev, unsigned char c)
+static int uart_ytm32_latch_errors(const struct device *dev)
 {
 	const struct uart_ytm32_config *config = dev->config;
-	UART_Type *base = (UART_Type *)config->base;
-
-	/* 等待发送数据寄存器空中断标志位 */
-	while (!UART_GetStatusFlag(base, UART_TX_DATA_REG_EMPTY)) {
-	}
-
-	UART_Putchar(base, c);
-}
-
-static int uart_ytm32_err_check(const struct device *dev)
-{
-	const struct uart_ytm32_config *config = dev->config;
+	struct uart_ytm32_data *data = dev->data;
 	UART_Type *base = (UART_Type *)config->base;
 	int errors = 0;
 
@@ -100,6 +81,71 @@ static int uart_ytm32_err_check(const struct device *dev)
 		errors |= UART_ERROR_NOISE;
 		(void)UART_ClearStatusFlag(base, UART_NOISE_DETECT);
 	}
+
+	data->errors |= errors;
+
+	return errors;
+}
+
+static void uart_ytm32_recover_rx(UART_Type *base, int errors)
+{
+	if (errors == 0) {
+		return;
+	}
+
+#if defined(FEATURE_UART_FIFO_SIZE) && (FEATURE_UART_FIFO_SIZE > 0U)
+	if ((errors & UART_ERROR_OVERRUN) != 0) {
+		UART_ResetRxFifo(base);
+		UART_SetRxFifoWatermark(base, 0U);
+		UART_EnableRxFifo(base, true);
+	}
+#endif
+
+	UART_SetReceiverCmd(base, true);
+}
+
+static int uart_ytm32_poll_in(const struct device *dev, unsigned char *c)
+{
+	const struct uart_ytm32_config *config = dev->config;
+	UART_Type *base = (UART_Type *)config->base;
+	int errors;
+
+	errors = uart_ytm32_latch_errors(dev);
+
+	if (!UART_GetStatusFlag(base, UART_RX_DATA_REG_FULL)) {
+		uart_ytm32_recover_rx(base, errors);
+		return -1;
+	}
+
+	UART_Getchar8(base, c);
+	errors |= uart_ytm32_latch_errors(dev);
+	uart_ytm32_recover_rx(base, errors);
+
+	return 0;
+}
+
+static void uart_ytm32_poll_out(const struct device *dev, unsigned char c)
+{
+	const struct uart_ytm32_config *config = dev->config;
+	UART_Type *base = (UART_Type *)config->base;
+
+	/* 等待发送数据寄存器空中断标志位 */
+	while (!UART_GetStatusFlag(base, UART_TX_DATA_REG_EMPTY)) {
+	}
+
+	UART_Putchar(base, c);
+}
+
+static int uart_ytm32_err_check(const struct device *dev)
+{
+	const struct uart_ytm32_config *config = dev->config;
+	struct uart_ytm32_data *data = dev->data;
+	UART_Type *base = (UART_Type *)config->base;
+	int errors;
+
+	errors = data->errors | uart_ytm32_latch_errors(dev);
+	data->errors = 0;
+	uart_ytm32_recover_rx(base, errors);
 
 	return errors;
 }
@@ -155,6 +201,15 @@ static int uart_ytm32_init(const struct device *dev)
 	}
 
 	UART_Type *base_addr = (UART_Type *)config->base;
+	base_addr->INTE = 0U;
+	UART_DRV_ClearErrorFlags(base_addr);
+
+	#if defined(FEATURE_UART_FIFO_SIZE) && (FEATURE_UART_FIFO_SIZE > 0U)
+	UART_ResetRxFifo(base_addr);
+	UART_SetRxFifoWatermark(base_addr, 0U);
+	UART_EnableRxFifo(base_addr, true);
+	#endif
+
 	/* 持久开启发送和接收功能，因为 SendDataPolling 会不断开关导致截断 */
 	UART_SetTransmitterCmd(base_addr, true);
 	UART_SetReceiverCmd(base_addr, true);
