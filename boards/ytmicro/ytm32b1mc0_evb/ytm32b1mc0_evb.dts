@@ -31,11 +31,12 @@
         };
     };
 
-	aliases {
-		led0 = &led_red;
-		led1 = &led_green;
-		watchdog0 = &wdog0;
-	};
+    aliases {
+        counter = &lptmr0;
+        led0 = &led_red;
+        led1 = &led_green;
+        watchdog0 = &wdog0;
+    };
 };
 
 &cgu {
@@ -84,4 +85,8 @@
 
 &wdog0 {
 	status = "okay";
+};
+
+&lptmr0 {
+    status = "okay";
 };

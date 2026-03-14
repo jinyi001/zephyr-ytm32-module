@@ -80,6 +80,16 @@
 			status = "disabled";
 		};
 
+		lptmr0: lptmr@4005d000 {
+			compatible = "ytmicro,ytm32-lptmr";
+			reg = <0x4005d000 0x1000>;
+			interrupts = <58 0>;
+			clocks = <&cgu YTM32_CLOCK_LPTMR0>;
+			ytmicro,functional-clock-source = <YTM32_CLOCK_SRC_LPO>;
+			ytmicro,functional-clock-divider = <1>;
+			status = "disabled";
+		};
+
 		gpioa: gpio@40011000 {
 			compatible = "ytmicro,ytm32-gpio";
 			reg = <0x40011000 0x100>,  /* GPIO */
