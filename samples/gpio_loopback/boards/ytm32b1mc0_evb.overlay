@@ -1,0 +1,24 @@
+/ {
+	aliases {
+		loopback-out = &loop_out;
+		loopback-in = &loop_in;
+	};
+
+	loopback_outputs {
+		compatible = "gpio-leds";
+
+		loop_out: loop_out {
+			gpios = <&gpiod 2 GPIO_ACTIVE_HIGH>;
+			label = "Loopback Output";
+		};
+	};
+
+	loopback_inputs {
+		compatible = "gpio-keys";
+
+		loop_in: loop_in {
+			gpios = <&gpiod 3 GPIO_ACTIVE_HIGH>;
+			label = "Loopback Input";
+		};
+	};
+};
