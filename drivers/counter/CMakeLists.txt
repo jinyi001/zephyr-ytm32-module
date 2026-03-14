@@ -1,0 +1,3 @@
+zephyr_library()
+
+zephyr_library_sources_ifdef(CONFIG_COUNTER_YTM32_LPTMR counter_ytm32_lptmr.c)

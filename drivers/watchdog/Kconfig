@@ -1,0 +1,12 @@
+# Copyright (c) 2026 YI JIN <jinyi_2001@foxmail.com>
+# SPDX-License-Identifier: Apache-2.0
+
+config WDT_YTM32
+	bool "YTMicro YTM32 watchdog driver"
+	default y
+	depends on WATCHDOG
+	depends on HAS_YTMICRO_HAL
+	depends on DT_HAS_YTMICRO_YTM32_WDG_ENABLED
+	select HAS_WDT_NO_CALLBACKS
+	help
+	  Enable the MVP watchdog driver for YTMicro YTM32 SoCs.
