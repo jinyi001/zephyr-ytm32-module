@@ -68,6 +68,9 @@ struct ytm32_lptmr_config {
 	uint32_t clock_sel;
 	uint32_t irqn;
 	void (*irq_config_func)(const struct device *dev);
+	uint32_t prescaler_val;
+	bool bypass_prescaler;
+	uint32_t prescaler_div;
 };
 
 struct ytm32_lptmr_data {
@@ -227,8 +230,8 @@ static void ytm32_lptmr_program(const struct device *dev, bool running_after)
 
 	ytm32_lptmr_set_timer_mode(base);
 	ytm32_lptmr_set_free_running(base, !ytm32_lptmr_uses_restart_mode(data));
-	ytm32_lptmr_set_prescaler(base, 0U);
-	ytm32_lptmr_set_bypass(base, true);
+	ytm32_lptmr_set_prescaler(base, config->prescaler_val);
+	ytm32_lptmr_set_bypass(base, config->bypass_prescaler);
 	ytm32_lptmr_set_clock_source(base, config->clock_sel);
 	ytm32_lptmr_set_compare(base, data->top);
 	ytm32_lptmr_set_interrupt(base, ytm32_lptmr_irq_required(data));
@@ -548,6 +551,8 @@ static int ytm32_lptmr_init(const struct device *dev)
 		return ret < 0 ? ret : -EINVAL;
 	}
 
+	data->freq /= config->prescaler_div;
+
 	data->top = YTM32_LPTMR_DEFAULT_TOP;
 	ytm32_lptmr_program(dev, false);
 	config->irq_config_func(dev);
@@ -566,6 +571,26 @@ static DEVICE_API(counter, ytm32_lptmr_api) = {
 	.get_top_value = ytm32_lptmr_get_top_value,
 	.get_freq = ytm32_lptmr_get_freq,
 };
+
+#define YTM32_LPTMR_PRESCALER_VAL(p) \
+	((p) == 1 ? 0 : \
+	 (p) == 2 ? 0 : \
+	 (p) == 4 ? 1 : \
+	 (p) == 8 ? 2 : \
+	 (p) == 16 ? 3 : \
+	 (p) == 32 ? 4 : \
+	 (p) == 64 ? 5 : \
+	 (p) == 128 ? 6 : \
+	 (p) == 256 ? 7 : \
+	 (p) == 512 ? 8 : \
+	 (p) == 1024 ? 9 : \
+	 (p) == 2048 ? 10 : \
+	 (p) == 4096 ? 11 : \
+	 (p) == 8192 ? 12 : \
+	 (p) == 16384 ? 13 : \
+	 (p) == 32768 ? 14 : 15)
+
+#define YTM32_LPTMR_PRESCALER_BYPASS(p) ((p) == 1)
 
 #define YTM32_LPTMR_INIT(n) \
 	YTM32_LPTMR_INSTANCE_VALID(DT_INST_REG_ADDR(n)); \
@@ -592,6 +617,9 @@ static DEVICE_API(counter, ytm32_lptmr_api) = {
 			DT_INST_PROP(n, ytmicro_functional_clock_source)), \
 		.irqn = DT_INST_IRQN(n), \
 		.irq_config_func = ytm32_lptmr_irq_config_##n, \
+		.prescaler_val = YTM32_LPTMR_PRESCALER_VAL(DT_INST_PROP(n, ytmicro_prescaler)), \
+		.bypass_prescaler = YTM32_LPTMR_PRESCALER_BYPASS(DT_INST_PROP(n, ytmicro_prescaler)), \
+		.prescaler_div = DT_INST_PROP(n, ytmicro_prescaler), \
 	}; \
 	DEVICE_DT_INST_DEFINE(n, ytm32_lptmr_init, NULL, &ytm32_lptmr_data_##n, \
 			      &ytm32_lptmr_config_##n, POST_KERNEL, \

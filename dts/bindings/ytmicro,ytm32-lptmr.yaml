@@ -24,10 +24,9 @@ properties:
       Use `YTM32_CLOCK_SRC_*` values from
       `zephyr/dt-bindings/clock/ytmicro,ytm32-clock.h`.
 
-  ytmicro,functional-clock-divider:
+  ytmicro,prescaler:
     type: int
     required: false
     default: 1
     description: |
-      LPTMR functional clock divider expressed as the hardware divide value.
-      Valid range is 1 to 16.
+      Prescaler for LPTMR. Valid values are 1 (bypass), 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536.
