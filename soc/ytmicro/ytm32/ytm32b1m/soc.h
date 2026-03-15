@@ -7,6 +7,11 @@
 #define SOC_H_
 
 #include <YTM32B1MC0.h>
+
+/* CMSIS Compatibility */
+#define SVCall_IRQn SVC_IRQn
+#define MemoryManagement_IRQn MemManage_IRQn
+
 #include <cmsis_core_m_defaults.h>
 
 #endif /* SOC_H_ */
