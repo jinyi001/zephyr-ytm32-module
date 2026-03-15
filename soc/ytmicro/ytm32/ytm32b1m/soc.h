@@ -6,6 +6,7 @@
 #ifndef SOC_H_
 #define SOC_H_
 
+#include <YTM32B1MC0.h>
 #include <cmsis_core_m_defaults.h>
 
 #endif /* SOC_H_ */

@@ -10,6 +10,7 @@
 #include <zephyr/drivers/clock_control.h>
 #include <zephyr/drivers/pinctrl.h>
 #include <zephyr/sys/util.h>
+#include <zephyr/irq.h>
 #include <errno.h>
 
 #define YTM32_UART_MAX_FUNCTIONAL_CLOCK_HZ 40000000U
@@ -48,11 +49,18 @@ struct uart_ytm32_config {
 	const struct device *clock_dev;
 	clock_control_subsys_t clock_subsys;
 	const struct pinctrl_dev_config *pincfg;
+#ifdef CONFIG_UART_INTERRUPT_DRIVEN
+	uart_irq_config_func_t irq_config_func;
+#endif
 };
 
 struct uart_ytm32_data {
 	uart_state_t hal_state;
 	int errors;
+#ifdef CONFIG_UART_INTERRUPT_DRIVEN
+	uart_irq_callback_user_data_t callback;
+	void *cb_data;
+#endif
 };
 
 static int uart_ytm32_latch_errors(const struct device *dev)
@@ -150,10 +158,160 @@ static int uart_ytm32_err_check(const struct device *dev)
 	return errors;
 }
 
+#ifdef CONFIG_UART_INTERRUPT_DRIVEN
+static int uart_ytm32_fifo_fill(const struct device *dev, const uint8_t *tx_data, int len)
+{
+	const struct uart_ytm32_config *config = dev->config;
+	UART_Type *base = (UART_Type *)config->base;
+	int num_tx = 0;
+
+	while ((len - num_tx > 0) && UART_GetStatusFlag(base, UART_TX_DATA_REG_EMPTY)) {
+		UART_Putchar(base, tx_data[num_tx++]);
+	}
+
+	return num_tx;
+}
+
+static int uart_ytm32_fifo_read(const struct device *dev, uint8_t *rx_data, const int len)
+{
+	const struct uart_ytm32_config *config = dev->config;
+	UART_Type *base = (UART_Type *)config->base;
+	int num_rx = 0;
+
+	while ((len - num_rx > 0) && UART_GetStatusFlag(base, UART_RX_DATA_REG_FULL)) {
+		UART_Getchar8(base, &rx_data[num_rx++]);
+	}
+
+	return num_rx;
+}
+
+static void uart_ytm32_irq_tx_enable(const struct device *dev)
+{
+	const struct uart_ytm32_config *config = dev->config;
+	UART_SetIntMode((UART_Type *)config->base, UART_INT_TX_DATA_REG_EMPTY, true);
+}
+
+static void uart_ytm32_irq_tx_disable(const struct device *dev)
+{
+	const struct uart_ytm32_config *config = dev->config;
+	UART_SetIntMode((UART_Type *)config->base, UART_INT_TX_DATA_REG_EMPTY, false);
+}
+
+static int uart_ytm32_irq_tx_ready(const struct device *dev)
+{
+	const struct uart_ytm32_config *config = dev->config;
+	UART_Type *base = (UART_Type *)config->base;
+
+	return (UART_GetIntMode(base, UART_INT_TX_DATA_REG_EMPTY) &&
+		UART_GetStatusFlag(base, UART_TX_DATA_REG_EMPTY));
+}
+
+static void uart_ytm32_irq_rx_enable(const struct device *dev)
+{
+	const struct uart_ytm32_config *config = dev->config;
+	UART_SetIntMode((UART_Type *)config->base, UART_INT_RX_DATA_REG_FULL, true);
+}
+
+static void uart_ytm32_irq_rx_disable(const struct device *dev)
+{
+	const struct uart_ytm32_config *config = dev->config;
+	UART_SetIntMode((UART_Type *)config->base, UART_INT_RX_DATA_REG_FULL, false);
+}
+
+static int uart_ytm32_irq_tx_complete(const struct device *dev)
+{
+	const struct uart_ytm32_config *config = dev->config;
+	UART_Type *base = (UART_Type *)config->base;
+
+	return UART_GetStatusFlag(base, UART_TX_COMPLETE);
+}
+
+static int uart_ytm32_irq_rx_ready(const struct device *dev)
+{
+	const struct uart_ytm32_config *config = dev->config;
+	UART_Type *base = (UART_Type *)config->base;
+
+	return (UART_GetIntMode(base, UART_INT_RX_DATA_REG_FULL) &&
+		UART_GetStatusFlag(base, UART_RX_DATA_REG_FULL));
+}
+
+static void uart_ytm32_irq_err_enable(const struct device *dev)
+{
+	const struct uart_ytm32_config *config = dev->config;
+	UART_Type *base = (UART_Type *)config->base;
+
+	UART_SetIntMode(base, UART_INT_RX_OVERRUN, true);
+	UART_SetIntMode(base, UART_INT_FRAME_ERR_FLAG, true);
+	UART_SetIntMode(base, UART_INT_PARITY_ERR_FLAG, true);
+	UART_SetIntMode(base, UART_INT_NOISE_ERR_FLAG, true);
+}
+
+static void uart_ytm32_irq_err_disable(const struct device *dev)
+{
+	const struct uart_ytm32_config *config = dev->config;
+	UART_Type *base = (UART_Type *)config->base;
+
+	UART_SetIntMode(base, UART_INT_RX_OVERRUN, false);
+	UART_SetIntMode(base, UART_INT_FRAME_ERR_FLAG, false);
+	UART_SetIntMode(base, UART_INT_PARITY_ERR_FLAG, false);
+	UART_SetIntMode(base, UART_INT_NOISE_ERR_FLAG, false);
+}
+
+static int uart_ytm32_irq_is_pending(const struct device *dev)
+{
+	const struct uart_ytm32_config *config = dev->config;
+	UART_Type *base = (UART_Type *)config->base;
+
+	return (uart_ytm32_irq_tx_ready(dev) || uart_ytm32_irq_rx_ready(dev));
+}
+
+static int uart_ytm32_irq_update(const struct device *dev)
+{
+	return 1;
+}
+
+static int uart_ytm32_irq_callback_set(const struct device *dev,
+				       uart_irq_callback_user_data_t cb,
+				       void *cb_data)
+{
+	struct uart_ytm32_data *data = dev->data;
+
+	data->callback = cb;
+	data->cb_data = cb_data;
+
+	return 0;
+}
+
+static void uart_ytm32_isr(const struct device *dev)
+{
+	struct uart_ytm32_data *data = dev->data;
+
+	if (data->callback) {
+		data->callback(dev, data->cb_data);
+	}
+}
+#endif /* CONFIG_UART_INTERRUPT_DRIVEN */
+
 static const struct uart_driver_api uart_ytm32_driver_api = {
 	.poll_in = uart_ytm32_poll_in,
 	.poll_out = uart_ytm32_poll_out,
 	.err_check = uart_ytm32_err_check,
+#ifdef CONFIG_UART_INTERRUPT_DRIVEN
+	.fifo_fill = uart_ytm32_fifo_fill,
+	.fifo_read = uart_ytm32_fifo_read,
+	.irq_tx_enable = uart_ytm32_irq_tx_enable,
+	.irq_tx_disable = uart_ytm32_irq_tx_disable,
+	.irq_tx_ready = uart_ytm32_irq_tx_ready,
+	.irq_rx_enable = uart_ytm32_irq_rx_enable,
+	.irq_rx_disable = uart_ytm32_irq_rx_disable,
+	.irq_tx_complete = uart_ytm32_irq_tx_complete,
+	.irq_rx_ready = uart_ytm32_irq_rx_ready,
+	.irq_err_enable = uart_ytm32_irq_err_enable,
+	.irq_err_disable = uart_ytm32_irq_err_disable,
+	.irq_is_pending = uart_ytm32_irq_is_pending,
+	.irq_update = uart_ytm32_irq_update,
+	.irq_callback_set = uart_ytm32_irq_callback_set,
+#endif
 };
 
 static int uart_ytm32_init(const struct device *dev)
@@ -214,12 +372,32 @@ static int uart_ytm32_init(const struct device *dev)
 	UART_SetTransmitterCmd(base_addr, true);
 	UART_SetReceiverCmd(base_addr, true);
 
+#ifdef CONFIG_UART_INTERRUPT_DRIVEN
+	config->irq_config_func(dev);
+#endif
+
 	return 0;
 }
+
+#ifdef CONFIG_UART_INTERRUPT_DRIVEN
+#define YTM32_UART_IRQ_CONFIG_FUNC(n) \
+	static void uart_ytm32_irq_config_##n(const struct device *dev) \
+	{ \
+		IRQ_CONNECT(DT_INST_IRQN(n), DT_INST_IRQ(n, priority), \
+			    uart_ytm32_isr, DEVICE_DT_INST_GET(n), 0); \
+		irq_enable(DT_INST_IRQN(n)); \
+	}
+#define YTM32_UART_IRQ_CONFIG_INIT(n) \
+	.irq_config_func = uart_ytm32_irq_config_##n,
+#else
+#define YTM32_UART_IRQ_CONFIG_FUNC(n)
+#define YTM32_UART_IRQ_CONFIG_INIT(n)
+#endif
 
 #define YTM32_UART_INIT(n) \
 	YTM32_UART_INSTANCE_VALID(DT_INST_REG_ADDR(n)); \
 	PINCTRL_DT_INST_DEFINE(n); \
+	YTM32_UART_IRQ_CONFIG_FUNC(n) \
 	static struct uart_ytm32_data uart_ytm32_data_##n; \
 	static const struct uart_ytm32_config uart_ytm32_config_##n = { \
 		.base = DT_INST_REG_ADDR(n), \
@@ -228,6 +406,7 @@ static int uart_ytm32_init(const struct device *dev)
 		.clock_dev = DEVICE_DT_GET(DT_INST_CLOCKS_CTLR(n)), \
 		.clock_subsys = (clock_control_subsys_t)DT_INST_CLOCKS_CELL(n, id), \
 		.pincfg = PINCTRL_DT_INST_DEV_CONFIG_GET(n), \
+		YTM32_UART_IRQ_CONFIG_INIT(n) \
 	}; \
 	DEVICE_DT_INST_DEFINE(n, &uart_ytm32_init, NULL, &uart_ytm32_data_##n, \
 			      &uart_ytm32_config_##n, PRE_KERNEL_1, \

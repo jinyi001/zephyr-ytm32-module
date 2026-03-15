@@ -1,5 +1,0 @@
-west:
-  command: C:\Users\JinYi\zephyrproject\.venv\Lib\site-packages\west\__main__.py build
-    -b ytm32b1mc0_evb samples/uart_poll_smoke -d build-board-uart-poll -p always
-  topdir: C:\Users\JinYi\zephyrproject
-  version: 1.5.0
