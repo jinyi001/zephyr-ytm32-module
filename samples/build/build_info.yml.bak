@@ -1,0 +1,6 @@
+west:
+  command: /root/zephyrproject/.venv/bin/west build -b ytm32b1mc0_evb /root/zephyrproject/zephyr-ytm32-module/samples/verification/uart_irq_scope
+    -p --build-dir /root/zephyrproject/zephyr-ytm32-module/samples/build/ -- -DBOARD_ROOT=/root/zephyrproject/zephyr
+    -DCONFIG_DEBUG_OPTIMIZATIONS=y -DCONFIG_DEBUG_THREAD_INFO=y
+  topdir: /root/zephyrproject
+  version: 1.5.0

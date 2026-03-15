@@ -1,6 +1,7 @@
 rsource "interrupt_controller/Kconfig"
 rsource "serial/Kconfig"
 rsource "clock_control/Kconfig"
+rsource "counter/Kconfig"
 rsource "pinctrl/Kconfig"
 rsource "gpio/Kconfig"
 rsource "watchdog/Kconfig"

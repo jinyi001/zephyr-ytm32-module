@@ -1,0 +1,64 @@
+cmake:
+  application:
+    configuration-dir: '/root/zephyrproject/zephyr-ytm32-module/samples/verification/uart_irq_scope'
+    source-dir: '/root/zephyrproject/zephyr-ytm32-module/samples/verification/uart_irq_scope'
+  board:
+    name: 'ytm32b1mc0_evb'
+    path:
+     - '/root/zephyrproject/zephyr-ytm32-module/boards/ytmicro/ytm32b1mc0_evb'
+    qualifiers: 'ytm32b1mc0'
+    revision: ''
+  devicetree:
+    bindings-dirs:
+     - '/root/zephyrproject/zephyr-ytm32-module/dts/bindings'
+     - '/root/zephyrproject/zephyr/dts/bindings'
+    files:
+     - '/root/zephyrproject/zephyr-ytm32-module/boards/ytmicro/ytm32b1mc0_evb/ytm32b1mc0_evb.dts'
+    include-dirs:
+     - '/root/zephyrproject/modules/hal/ambiq/dts'
+     - '/root/zephyrproject/modules/hal/atmel/include'
+     - '/root/zephyrproject/modules/hal/bouffalolab/include'
+     - '/root/zephyrproject/modules/hal/bouffalolab/include/zephyr'
+     - '/root/zephyrproject/modules/hal/gigadevice/include'
+     - '/root/zephyrproject/modules/hal/microchip/include'
+     - '/root/zephyrproject/modules/hal/microchip/dts'
+     - '/root/zephyrproject/modules/hal/nuvoton/dts'
+     - '/root/zephyrproject/modules/hal/nxp/dts'
+     - '/root/zephyrproject/modules/hal/stm32/dts'
+     - '/root/zephyrproject/modules/hal/ti/dts'
+     - '/root/zephyrproject/zephyr-ytm32-module/include'
+     - '/root/zephyrproject/zephyr-ytm32-module/include/zephyr'
+     - '/root/zephyrproject/zephyr-ytm32-module/dts/arm'
+     - '/root/zephyrproject/zephyr-ytm32-module/dts'
+     - '/root/zephyrproject/zephyr/include'
+     - '/root/zephyrproject/zephyr/include/zephyr'
+     - '/root/zephyrproject/zephyr/dts/common'
+     - '/root/zephyrproject/zephyr/dts/vendor'
+     - '/root/zephyrproject/zephyr/dts/rx'
+     - '/root/zephyrproject/zephyr/dts/x86'
+     - '/root/zephyrproject/zephyr/dts/xtensa'
+     - '/root/zephyrproject/zephyr/dts/sparc'
+     - '/root/zephyrproject/zephyr/dts/riscv'
+     - '/root/zephyrproject/zephyr/dts/posix'
+     - '/root/zephyrproject/zephyr/dts/arm64'
+     - '/root/zephyrproject/zephyr/dts/arm'
+     - '/root/zephyrproject/zephyr/dts/arc'
+     - '/root/zephyrproject/zephyr/dts'
+  kconfig:
+    files:
+     - '/root/zephyrproject/zephyr-ytm32-module/boards/ytmicro/ytm32b1mc0_evb/ytm32b1mc0_evb_defconfig'
+     - '/root/zephyrproject/zephyr-ytm32-module/samples/verification/uart_irq_scope/prj.conf'
+     - '/root/zephyrproject/zephyr-ytm32-module/samples/build/zephyr/misc/generated/extra_kconfig_options.conf'
+    user-files:
+     - '/root/zephyrproject/zephyr-ytm32-module/samples/verification/uart_irq_scope/prj.conf'
+  toolchain:
+    name: 'zephyr'
+    path: '/root/zephyr-sdk-0.17.4'
+  zephyr:
+    version: '4.3.99'
+    zephyr-base: '/root/zephyrproject/zephyr'
+version: '0.1.0'
+west:
+  command: '/root/zephyrproject/.venv/bin/west build -b ytm32b1mc0_evb /root/zephyrproject/zephyr-ytm32-module/samples/verification/uart_irq_scope -p --build-dir /root/zephyrproject/zephyr-ytm32-module/samples/build/ -- -DBOARD_ROOT=/root/zephyrproject/zephyr -DCONFIG_DEBUG_OPTIMIZATIONS=y -DCONFIG_DEBUG_THREAD_INFO=y'
+  topdir: '/root/zephyrproject'
+  version: '1.5.0'
