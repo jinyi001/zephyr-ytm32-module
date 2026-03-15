@@ -426,6 +426,8 @@ static int clock_control_ytm32_get_rate(const struct device *dev, clock_control_
 {
 	struct clock_control_ytm32_data *data = dev->data;
 	uint32_t clock_id = (uint32_t)(uintptr_t)sys;
+	const struct ytm32_module_clock_config *clock_cfg;
+	int ret;
 
 	if (rate == NULL) {
 		return -EINVAL;
@@ -453,14 +455,37 @@ static int clock_control_ytm32_get_rate(const struct device *dev, clock_control_
 		return 0;
 	}
 
-	if (ytm32_find_module_clock(clock_id) == NULL) {
+	clock_cfg = ytm32_find_module_clock(clock_id);
+	if (clock_cfg == NULL) {
 		LOG_ERR("Unsupported YTM32 clock %s (%u)",
 			ytm32_clock_label(clock_id), clock_id);
 		return -ENOTSUP;
 	}
 
-	return ytm32_query_clock_rate(clock_id,
-				      ytm32_clock_label(clock_id), rate);
+	ret = ytm32_query_clock_rate(clock_id, ytm32_clock_label(clock_id), rate);
+	if ((ret == 0) && (*rate == 0U)) {
+		/* Fallback for modules lacking IPC clock source selection */
+		uint32_t src_clock_id = 0U;
+		switch (clock_cfg->clk_src) {
+		case YTM32_CLOCK_SRC_FIRC: src_clock_id = 36U; break; /* IPC_FIRC_CLK */
+		case YTM32_CLOCK_SRC_SIRC: src_clock_id = 35U; break; /* IPC_SIRC_CLK */
+		case YTM32_CLOCK_SRC_FXOSC: src_clock_id = 37U; break; /* IPC_FXOSC_CLK */
+		case YTM32_CLOCK_SRC_LPO: src_clock_id = 38U; break; /* IPC_LPO_CLK */
+		case YTM32_CLOCK_SRC_FAST_BUS: src_clock_id = 41U; break; /* FAST_BUS_CLK */
+		default: src_clock_id = 0U; break;
+		}
+
+		if (src_clock_id != 0U) {
+			ret = ytm32_query_clock_rate(src_clock_id, "source_clock", rate);
+			if (ret == 0) {
+				*rate /= clock_cfg->divider;
+			}
+		} else {
+			ret = -ENOTSUP;
+		}
+	}
+
+	return ret;
 
 }
 

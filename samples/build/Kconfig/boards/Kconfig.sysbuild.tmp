@@ -1,0 +1,2 @@
+# Load Sysbuild board Kconfig descriptions.
+osource "/root/zephyrproject/zephyr-ytm32-module/boards/ytmicro/ytm32b1mc0_evb/Kconfig.sysbuild"

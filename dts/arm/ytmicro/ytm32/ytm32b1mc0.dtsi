@@ -85,8 +85,8 @@
 			reg = <0x4005d000 0x1000>;
 			interrupts = <58 0>;
 			clocks = <&cgu YTM32_CLOCK_LPTMR0>;
-			ytmicro,functional-clock-source = <YTM32_CLOCK_SRC_LPO>;
-			ytmicro,functional-clock-divider = <1>;
+			ytmicro,functional-clock-source = <YTM32_CLOCK_SRC_FXOSC>;
+			ytmicro,prescaler = <1024>;
 			status = "disabled";
 		};
 

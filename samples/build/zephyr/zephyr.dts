@@ -1,0 +1,271 @@
+/dts-v1/;
+
+/* node '/' defined in zephyr/dts/common/skeleton.dtsi:9 */
+/ {
+	#address-cells = < 0x1 >;     /* in zephyr/dts/common/skeleton.dtsi:10 */
+	#size-cells = < 0x1 >;        /* in zephyr/dts/common/skeleton.dtsi:11 */
+	model = "YTM YTM32 EVB";      /* in zephyr-ytm32-module/boards/ytmicro/ytm32b1mc0_evb/ytm32b1mc0_evb.dts:12 */
+	compatible = "ytm,ytm32-evb"; /* in zephyr-ytm32-module/boards/ytmicro/ytm32b1mc0_evb/ytm32b1mc0_evb.dts:13 */
+
+	/* node '/chosen' defined in zephyr/dts/common/skeleton.dtsi:13 */
+	chosen {
+		zephyr,sram = &sram0;       /* in zephyr-ytm32-module/boards/ytmicro/ytm32b1mc0_evb/ytm32b1mc0_evb.dts:16 */
+		zephyr,flash = &flash0;     /* in zephyr-ytm32-module/boards/ytmicro/ytm32b1mc0_evb/ytm32b1mc0_evb.dts:17 */
+		zephyr,console = &uart1;    /* in zephyr-ytm32-module/boards/ytmicro/ytm32b1mc0_evb/ytm32b1mc0_evb.dts:18 */
+		zephyr,shell-uart = &uart1; /* in zephyr-ytm32-module/boards/ytmicro/ytm32b1mc0_evb/ytm32b1mc0_evb.dts:19 */
+	};
+
+	/* node '/aliases' defined in zephyr/dts/common/skeleton.dtsi:15 */
+	aliases {
+		led0 = &led_red;    /* in zephyr-ytm32-module/boards/ytmicro/ytm32b1mc0_evb/ytm32b1mc0_evb.dts:37 */
+		led1 = &led_green;  /* in zephyr-ytm32-module/boards/ytmicro/ytm32b1mc0_evb/ytm32b1mc0_evb.dts:38 */
+		watchdog0 = &wdog0; /* in zephyr-ytm32-module/boards/ytmicro/ytm32b1mc0_evb/ytm32b1mc0_evb.dts:39 */
+		counter = &lptmr0;  /* in zephyr-ytm32-module/boards/ytmicro/ytm32b1mc0_evb/ytm32b1mc0_evb.dts:40 */
+	};
+
+	/* node '/soc' defined in zephyr/dts/arm/armv8-m.dtsi:6 */
+	soc {
+		#address-cells = < 0x1 >;     /* in zephyr/dts/arm/armv8-m.dtsi:7 */
+		#size-cells = < 0x1 >;        /* in zephyr/dts/arm/armv8-m.dtsi:8 */
+		compatible = "simple-bus";    /* in zephyr/dts/arm/armv8-m.dtsi:9 */
+		interrupt-parent = < &nvic >; /* in zephyr/dts/arm/armv8-m.dtsi:10 */
+		ranges;                       /* in zephyr/dts/arm/armv8-m.dtsi:11 */
+
+		/* node '/soc/interrupt-controller@e000e100' defined in zephyr/dts/arm/armv8-m.dtsi:13 */
+		nvic: interrupt-controller@e000e100 {
+			#address-cells = < 0x1 >;            /* in zephyr/dts/arm/armv8-m.dtsi:14 */
+			compatible = "arm,v8m-nvic";         /* in zephyr/dts/arm/armv8-m.dtsi:15 */
+			reg = < 0xe000e100 0xc00 >;          /* in zephyr/dts/arm/armv8-m.dtsi:16 */
+			interrupt-controller;                /* in zephyr/dts/arm/armv8-m.dtsi:17 */
+			#interrupt-cells = < 0x2 >;          /* in zephyr/dts/arm/armv8-m.dtsi:18 */
+			arm,num-irq-priority-bits = < 0x3 >; /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:162 */
+			phandle = < 0x1 >;                   /* in zephyr/dts/arm/armv8-m.dtsi:10 */
+		};
+
+		/* node '/soc/timer@e000e010' defined in zephyr/dts/arm/armv8-m.dtsi:21 */
+		systick: timer@e000e010 {
+			compatible = "arm,armv8m-systick"; /* in zephyr/dts/arm/armv8-m.dtsi:22 */
+			reg = < 0xe000e010 0x10 >;         /* in zephyr/dts/arm/armv8-m.dtsi:23 */
+		};
+
+		/* node '/soc/flash@0' defined in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:44 */
+		flash0: flash@0 {
+			compatible = "soc-nv-flash"; /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:45 */
+			reg = < 0x0 0x40000 >;       /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:46 */
+		};
+
+		/* node '/soc/memory@20000000' defined in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:49 */
+		sram0: memory@20000000 {
+			compatible = "mmio-sram";    /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:50 */
+			reg = < 0x20000000 0x8000 >; /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:51 */
+		};
+
+		/* node '/soc/uart@4001b000' defined in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:54 */
+		uart0: uart@4001b000 {
+			compatible = "ytmicro,ytm32-uart";          /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:55 */
+			reg = < 0x4001b000 0x1000 >;                /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:56 */
+			interrupts = < 0x1f 0x0 >;                  /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:57 */
+			clocks = < &cgu 0x7 >;                      /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:58 */
+			ytmicro,functional-clock-source = < 0x3 >;  /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:59 */
+			ytmicro,functional-clock-divider = < 0x1 >; /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:60 */
+			status = "disabled";                        /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:61 */
+		};
+
+		/* node '/soc/uart@4001c000' defined in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:64 */
+		uart1: uart@4001c000 {
+			compatible = "ytmicro,ytm32-uart";          /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:65 */
+			reg = < 0x4001c000 0x1000 >;                /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:66 */
+			interrupts = < 0x21 0x0 >;                  /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:67 */
+			clocks = < &cgu 0x8 >;                      /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:68 */
+			status = "okay";                            /* in zephyr-ytm32-module/boards/ytmicro/ytm32b1mc0_evb/ytm32b1mc0_evb.dts:77 */
+			current-speed = < 0x1c200 >;                /* in zephyr-ytm32-module/boards/ytmicro/ytm32b1mc0_evb/ytm32b1mc0_evb.dts:78 */
+			ytmicro,functional-clock-source = < 0x3 >;  /* in zephyr-ytm32-module/boards/ytmicro/ytm32b1mc0_evb/ytm32b1mc0_evb.dts:79 */
+			ytmicro,functional-clock-divider = < 0x1 >; /* in zephyr-ytm32-module/boards/ytmicro/ytm32b1mc0_evb/ytm32b1mc0_evb.dts:80 */
+			pinctrl-0 = < &uart1_default >;             /* in zephyr-ytm32-module/boards/ytmicro/ytm32b1mc0_evb/ytm32b1mc0_evb.dts:81 */
+			pinctrl-names = "default";                  /* in zephyr-ytm32-module/boards/ytmicro/ytm32b1mc0_evb/ytm32b1mc0_evb.dts:82 */
+		};
+
+		/* node '/soc/watchdog@4006a000' defined in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:74 */
+		wdog0: watchdog@4006a000 {
+			compatible = "ytmicro,ytm32-wdg";       /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:75 */
+			reg = < 0x4006a000 0x1000 >;            /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:76 */
+			interrupts = < 0x16 0x0 >;              /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:77 */
+			clocks = < &cgu 0x1c >;                 /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:78 */
+			ytmicro,timeout-clock-source = < 0x0 >; /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:79 */
+			status = "okay";                        /* in zephyr-ytm32-module/boards/ytmicro/ytm32b1mc0_evb/ytm32b1mc0_evb.dts:90 */
+		};
+
+		/* node '/soc/lptmr@4005d000' defined in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:83 */
+		lptmr0: lptmr@4005d000 {
+			compatible = "ytmicro,ytm32-lptmr";        /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:84 */
+			reg = < 0x4005d000 0x1000 >;               /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:85 */
+			interrupts = < 0x3a 0x0 >;                 /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:86 */
+			clocks = < &cgu 0x18 >;                    /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:87 */
+			ytmicro,functional-clock-source = < 0x3 >; /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:88 */
+			ytmicro,prescaler = < 0x400 >;             /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:89 */
+			status = "okay";                           /* in zephyr-ytm32-module/boards/ytmicro/ytm32b1mc0_evb/ytm32b1mc0_evb.dts:94 */
+		};
+
+		/* node '/soc/gpio@40011000' defined in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:93 */
+		gpioa: gpio@40011000 {
+			compatible = "ytmicro,ytm32-gpio"; /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:94 */
+			reg = < 0x40011000 0x100 >,
+			      < 0x40012000 0x100 >;        /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:95 */
+			reg-names = "gpio",
+			            "pctrl";               /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:97 */
+			interrupts = < 0x3b 0x0 >;         /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:98 */
+			gpio-controller;                   /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:99 */
+			#gpio-cells = < 0x2 >;             /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:100 */
+			ngpios = < 0x20 >;                 /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:101 */
+			clocks = < &cgu 0x1 >;             /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:102 */
+			status = "disabled";               /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:103 */
+		};
+
+		/* node '/soc/gpio@40011100' defined in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:106 */
+		gpiob: gpio@40011100 {
+			compatible = "ytmicro,ytm32-gpio"; /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:107 */
+			reg = < 0x40011100 0x100 >,
+			      < 0x40013000 0x100 >;        /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:108 */
+			reg-names = "gpio",
+			            "pctrl";               /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:110 */
+			interrupts = < 0x3c 0x0 >;         /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:111 */
+			gpio-controller;                   /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:112 */
+			#gpio-cells = < 0x2 >;             /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:113 */
+			ngpios = < 0x20 >;                 /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:114 */
+			clocks = < &cgu 0x1 >;             /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:115 */
+			status = "disabled";               /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:116 */
+		};
+
+		/* node '/soc/gpio@40011200' defined in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:119 */
+		gpioc: gpio@40011200 {
+			compatible = "ytmicro,ytm32-gpio"; /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:120 */
+			reg = < 0x40011200 0x100 >,
+			      < 0x40014000 0x100 >;        /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:121 */
+			reg-names = "gpio",
+			            "pctrl";               /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:123 */
+			interrupts = < 0x3d 0x0 >;         /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:124 */
+			gpio-controller;                   /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:125 */
+			#gpio-cells = < 0x2 >;             /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:126 */
+			ngpios = < 0x20 >;                 /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:127 */
+			clocks = < &cgu 0x1 >;             /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:128 */
+			status = "disabled";               /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:129 */
+		};
+
+		/* node '/soc/gpio@40011300' defined in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:132 */
+		gpiod: gpio@40011300 {
+			compatible = "ytmicro,ytm32-gpio"; /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:133 */
+			reg = < 0x40011300 0x100 >,
+			      < 0x40015000 0x100 >;        /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:134 */
+			reg-names = "gpio",
+			            "pctrl";               /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:136 */
+			interrupts = < 0x3e 0x0 >;         /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:137 */
+			gpio-controller;                   /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:138 */
+			#gpio-cells = < 0x2 >;             /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:139 */
+			ngpios = < 0x20 >;                 /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:140 */
+			clocks = < &cgu 0x1 >;             /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:141 */
+			status = "okay";                   /* in zephyr-ytm32-module/boards/ytmicro/ytm32b1mc0_evb/ytm32b1mc0_evb.dts:86 */
+			phandle = < 0x4 >;                 /* in zephyr-ytm32-module/boards/ytmicro/ytm32b1mc0_evb/ytm32b1mc0_evb.dts:26 */
+		};
+
+		/* node '/soc/gpio@40011400' defined in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:145 */
+		gpioe: gpio@40011400 {
+			compatible = "ytmicro,ytm32-gpio"; /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:146 */
+			reg = < 0x40011400 0x100 >,
+			      < 0x40016000 0x100 >;        /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:147 */
+			reg-names = "gpio",
+			            "pctrl";               /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:149 */
+			interrupts = < 0x3f 0x0 >;         /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:150 */
+			gpio-controller;                   /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:151 */
+			#gpio-cells = < 0x2 >;             /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:152 */
+			ngpios = < 0x20 >;                 /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:153 */
+			clocks = < &cgu 0x1 >;             /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:154 */
+			status = "disabled";               /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:155 */
+		};
+	};
+
+	/* node '/cpus' defined in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:13 */
+	cpus {
+		#address-cells = < 0x1 >; /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:14 */
+		#size-cells = < 0x0 >;    /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:15 */
+
+		/* node '/cpus/cpu@0' defined in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:17 */
+		cpu0: cpu@0 {
+			device_type = "cpu";           /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:18 */
+			compatible = "arm,cortex-m33"; /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:19 */
+			reg = < 0x0 >;                 /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:20 */
+			#address-cells = < 0x1 >;      /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:21 */
+			#size-cells = < 0x1 >;         /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:22 */
+		};
+	};
+
+	/* node '/cgu' defined in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:26 */
+	cgu: cgu {
+		compatible = "ytmicro,ytm32-cgu"; /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:27 */
+		#clock-cells = < 0x1 >;           /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:28 */
+		status = "okay";                  /* in zephyr-ytm32-module/boards/ytmicro/ytm32b1mc0_evb/ytm32b1mc0_evb.dts:45 */
+		core-clock = < 0x4c4b400 >;       /* in zephyr-ytm32-module/boards/ytmicro/ytm32b1mc0_evb/ytm32b1mc0_evb.dts:46 */
+		core-divider = < 0x1 >;           /* in zephyr-ytm32-module/boards/ytmicro/ytm32b1mc0_evb/ytm32b1mc0_evb.dts:47 */
+		fast-bus-divider = < 0x1 >;       /* in zephyr-ytm32-module/boards/ytmicro/ytm32b1mc0_evb/ytm32b1mc0_evb.dts:48 */
+		slow-bus-divider = < 0x2 >;       /* in zephyr-ytm32-module/boards/ytmicro/ytm32b1mc0_evb/ytm32b1mc0_evb.dts:49 */
+		phandle = < 0x2 >;                /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:58 */
+	};
+
+	/* node '/pinctrl' defined in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:32 */
+	pinctrl: pinctrl {
+		compatible = "ytmicro,ytm32-pinctrl"; /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:33 */
+		clocks = < &cgu 0x2 >,
+		         < &cgu 0x3 >,
+		         < &cgu 0x4 >,
+		         < &cgu 0x5 >,
+		         < &cgu 0x6 >,
+		         < &cgu 0x1 >;                /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:34 */
+		status = "okay";                      /* in zephyr-ytm32-module/dts/arm/ytmicro/ytm32/ytm32b1mc0.dtsi:40 */
+
+		/* node '/pinctrl/uart1_default' defined in zephyr-ytm32-module/boards/ytmicro/ytm32b1mc0_evb/ytm32b1mc0_evb.dts:53 */
+		uart1_default: uart1_default {
+			phandle = < 0x3 >; /* in zephyr-ytm32-module/boards/ytmicro/ytm32b1mc0_evb/ytm32b1mc0_evb.dts:81 */
+
+			/* node '/pinctrl/uart1_default/group1' defined in zephyr-ytm32-module/boards/ytmicro/ytm32b1mc0_evb/ytm32b1mc0_evb.dts:54 */
+			group1 {
+				pinmux = < 0x28000002 >; /* in zephyr-ytm32-module/boards/ytmicro/ytm32b1mc0_evb/ytm32b1mc0_evb.dts:55 */
+				bias-pull-up;            /* in zephyr-ytm32-module/boards/ytmicro/ytm32b1mc0_evb/ytm32b1mc0_evb.dts:56 */
+				ytmicro,passive-filter;  /* in zephyr-ytm32-module/boards/ytmicro/ytm32b1mc0_evb/ytm32b1mc0_evb.dts:57 */
+			};
+
+			/* node '/pinctrl/uart1_default/group2' defined in zephyr-ytm32-module/boards/ytmicro/ytm32b1mc0_evb/ytm32b1mc0_evb.dts:60 */
+			group2 {
+				pinmux = < 0x29000002 >; /* in zephyr-ytm32-module/boards/ytmicro/ytm32b1mc0_evb/ytm32b1mc0_evb.dts:61 */
+				drive-push-pull;         /* in zephyr-ytm32-module/boards/ytmicro/ytm32b1mc0_evb/ytm32b1mc0_evb.dts:62 */
+				drive-strength = "high"; /* in zephyr-ytm32-module/boards/ytmicro/ytm32b1mc0_evb/ytm32b1mc0_evb.dts:63 */
+				slew-rate = "fast";      /* in zephyr-ytm32-module/boards/ytmicro/ytm32b1mc0_evb/ytm32b1mc0_evb.dts:64 */
+			};
+		};
+
+		/* node '/pinctrl/gpiod_leds' defined in zephyr-ytm32-module/boards/ytmicro/ytm32b1mc0_evb/ytm32b1mc0_evb.dts:68 */
+		gpiod_leds: gpiod_leds {
+
+			/* node '/pinctrl/gpiod_leds/group1' defined in zephyr-ytm32-module/boards/ytmicro/ytm32b1mc0_evb/ytm32b1mc0_evb.dts:69 */
+			group1 {
+				pinmux = < 0x35000001 >,
+				         < 0x36000001 >; /* in zephyr-ytm32-module/boards/ytmicro/ytm32b1mc0_evb/ytm32b1mc0_evb.dts:70 */
+			};
+		};
+	};
+
+	/* node '/leds' defined in zephyr-ytm32-module/boards/ytmicro/ytm32b1mc0_evb/ytm32b1mc0_evb.dts:22 */
+	leds {
+		compatible = "gpio-leds"; /* in zephyr-ytm32-module/boards/ytmicro/ytm32b1mc0_evb/ytm32b1mc0_evb.dts:23 */
+
+		/* node '/leds/led_0' defined in zephyr-ytm32-module/boards/ytmicro/ytm32b1mc0_evb/ytm32b1mc0_evb.dts:25 */
+		led_red: led_0 {
+			gpios = < &gpiod 0x5 0x1 >; /* in zephyr-ytm32-module/boards/ytmicro/ytm32b1mc0_evb/ytm32b1mc0_evb.dts:26 */
+			label = "Red LED (PTD5)";   /* in zephyr-ytm32-module/boards/ytmicro/ytm32b1mc0_evb/ytm32b1mc0_evb.dts:27 */
+		};
+
+		/* node '/leds/led_1' defined in zephyr-ytm32-module/boards/ytmicro/ytm32b1mc0_evb/ytm32b1mc0_evb.dts:30 */
+		led_green: led_1 {
+			gpios = < &gpiod 0x6 0x1 >; /* in zephyr-ytm32-module/boards/ytmicro/ytm32b1mc0_evb/ytm32b1mc0_evb.dts:31 */
+			label = "Green LED (PTD6)"; /* in zephyr-ytm32-module/boards/ytmicro/ytm32b1mc0_evb/ytm32b1mc0_evb.dts:32 */
+		};
+	};
+};

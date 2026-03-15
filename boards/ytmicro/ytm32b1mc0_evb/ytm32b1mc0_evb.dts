@@ -9,78 +9,81 @@
 #include <zephyr/dt-bindings/gpio/gpio.h>
 
 / {
-    model = "YTM YTM32 EVB";
-    compatible = "ytm,ytm32-evb";
+	model = "YTM YTM32 EVB";
+	compatible = "ytm,ytm32-evb";
 
-    chosen {
-        zephyr,sram = &sram0; 
-        zephyr,flash = &flash0;
-        zephyr,console = &uart1;
-        zephyr,shell-uart = &uart1;
-    };
+	chosen {
+		zephyr,sram = &sram0; 
+		zephyr,flash = &flash0;
+		zephyr,console = &uart1;
+		zephyr,shell-uart = &uart1;
+	};
 
-    leds {
-        compatible = "gpio-leds";
-        led_red: led_0 {
-            gpios = <&gpiod 5 GPIO_ACTIVE_LOW>;
-            label = "Red LED (PTD5)";
-        };
-        led_green: led_1 {
-            gpios = <&gpiod 6 GPIO_ACTIVE_LOW>;
-            label = "Green LED (PTD6)";
-        };
-    };
+	leds {
+		compatible = "gpio-leds";
 
-    aliases {
-        counter = &lptmr0;
-        led0 = &led_red;
-        led1 = &led_green;
-        watchdog0 = &wdog0;
-    };
+		led_red: led_0 {
+			gpios = <&gpiod 5 GPIO_ACTIVE_LOW>;
+			label = "Red LED (PTD5)";
+		};
+
+		led_green: led_1 {
+			gpios = <&gpiod 6 GPIO_ACTIVE_LOW>;
+			label = "Green LED (PTD6)";
+		};
+	};
+
+	aliases {
+		led0 = &led_red;
+		led1 = &led_green;
+		watchdog0 = &wdog0;
+		counter = &lptmr0;
+	};
 };
 
 &cgu {
-    status = "okay";
-    core-clock = <80000000>;
-    core-divider = <1>;
-    fast-bus-divider = <1>;
-    slow-bus-divider = <2>;
+	status = "okay";
+	core-clock = <80000000>;
+	core-divider = <1>;
+	fast-bus-divider = <1>;
+	slow-bus-divider = <2>;
 };
 
 &pinctrl {
-    uart1_default: uart1_default {
-        group1 {
-            pinmux = <YTM32_PTC8_UART1_RX>;
-            bias-pull-up;
-            ytmicro,passive-filter;
-        };
-        group2 {
-            pinmux = <YTM32_PTC9_UART1_TX>;
-            drive-push-pull;
-            drive-strength = "high";
-            slew-rate = "fast";
-        };
-    };
+	uart1_default: uart1_default {
+		group1 {
+			pinmux = <YTM32_PTC8_UART1_RX>;
+			bias-pull-up;
+			ytmicro,passive-filter;
+		};
 
-    gpiod_leds: gpiod_leds {
-        group1 {
-            pinmux = <YTM32_PTD5_GPIO>,
-                     <YTM32_PTD6_GPIO>;
-        };
-    };
+		group2 {
+			pinmux = <YTM32_PTC9_UART1_TX>;
+			drive-push-pull;
+			drive-strength = "high";
+			slew-rate = "fast";
+		};
+	};
+
+	gpiod_leds: gpiod_leds {
+		group1 {
+			pinmux = <YTM32_PTD5_GPIO>,
+				 <YTM32_PTD6_GPIO>;
+		};
+	};
 };
 
 &uart1 {
-    status = "okay";
-    current-speed = <115200>;
-    ytmicro,functional-clock-source = <YTM32_CLOCK_SRC_FXOSC>;
-    ytmicro,functional-clock-divider = <1>;
-    pinctrl-0 = <&uart1_default>;
-    pinctrl-names = "default";
+	status = "okay";
+	current-speed = <115200>;
+	ytmicro,functional-clock-source = <YTM32_CLOCK_SRC_FXOSC>;
+	ytmicro,functional-clock-divider = <1>;
+	pinctrl-0 = <&uart1_default>;
+	pinctrl-names = "default";
 };
 
 &gpiod {
-	status = "okay";
+status = "okay";
 };
 
 &wdog0 {
@@ -88,5 +91,5 @@
 };
 
 &lptmr0 {
-    status = "okay";
+	status = "okay";
 };

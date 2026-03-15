@@ -1,5 +1,0 @@
-west:
-  command: C:\Users\JinYi\zephyrproject\.venv\Lib\site-packages\west\__main__.py build
-    -t rom_report c:/Users/JinYi/zephyrproject/zephyr-ytm32-module/samples/verification/uart_poll_smoke
-  topdir: c:\Users\JinYi\zephyrproject
-  version: 1.5.0
