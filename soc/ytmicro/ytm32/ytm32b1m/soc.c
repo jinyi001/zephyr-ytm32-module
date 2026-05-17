@@ -4,7 +4,11 @@
  */
 
 #include <errno.h>
+#if defined(CONFIG_SOC_YTM32B1MD1)
+#include "system_YTM32B1MD1.h"
+#else
 #include "system_YTM32B1MC0.h"
+#endif
 #include "clock.h"
 #include <zephyr/init.h>
 #include <zephyr/dt-bindings/clock/ytmicro,ytm32-clock.h>

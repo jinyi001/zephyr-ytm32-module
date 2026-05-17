@@ -166,7 +166,7 @@ static const char *const ytm32_clock_labels[] = {
 	[YTM32_CLOCK_CORE] = "core",
 	[YTM32_CLOCK_FAST_BUS] = "fast_bus",
 	[YTM32_CLOCK_SLOW_BUS] = "slow_bus",
-	};
+};
 
 static const char *ytm32_clock_label(uint32_t clock_id)
 {
@@ -467,11 +467,13 @@ static int clock_control_ytm32_get_rate(const struct device *dev, clock_control_
 		/* Fallback for modules lacking IPC clock source selection */
 		uint32_t src_clock_id = 0U;
 		switch (clock_cfg->clk_src) {
-		case YTM32_CLOCK_SRC_FIRC: src_clock_id = 36U; break; /* IPC_FIRC_CLK */
-		case YTM32_CLOCK_SRC_SIRC: src_clock_id = 35U; break; /* IPC_SIRC_CLK */
-		case YTM32_CLOCK_SRC_FXOSC: src_clock_id = 37U; break; /* IPC_FXOSC_CLK */
-		case YTM32_CLOCK_SRC_LPO: src_clock_id = 38U; break; /* IPC_LPO_CLK */
-		case YTM32_CLOCK_SRC_FAST_BUS: src_clock_id = 41U; break; /* FAST_BUS_CLK */
+		case YTM32_CLOCK_SRC_FIRC: src_clock_id = YTM32_CLOCK_IPC_FIRC; break;
+		case YTM32_CLOCK_SRC_SIRC: src_clock_id = YTM32_CLOCK_IPC_SIRC; break;
+		case YTM32_CLOCK_SRC_FXOSC: src_clock_id = YTM32_CLOCK_IPC_FXOSC; break;
+#if defined(YTM32_CLOCK_IPC_LPO)
+		case YTM32_CLOCK_SRC_LPO: src_clock_id = YTM32_CLOCK_IPC_LPO; break;
+#endif
+		case YTM32_CLOCK_SRC_FAST_BUS: src_clock_id = YTM32_CLOCK_FAST_BUS; break;
 		default: src_clock_id = 0U; break;
 		}
 

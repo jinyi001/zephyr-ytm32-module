@@ -4,11 +4,11 @@
  */
 
 #include <arm/armv8-m.dtsi>
-#include <zephyr/dt-bindings/clock/ytmicro,ytm32b1mc0-clock.h>
+#include <zephyr/dt-bindings/clock/ytmicro,ytm32b1md1-clock.h>
 
 / {
-	model = "YTMicro YTM32B1MC0";
-	compatible = "ytm,ytm32b1mc0";
+	model = "YTMicro YTM32B1MD1";
+	compatible = "ytm,ytm32b1md1";
 
 	cpus {
 		#address-cells = <1>;
@@ -26,6 +26,10 @@
 	cgu: cgu {
 		compatible = "ytmicro,ytm32-cgu";
 		#clock-cells = <1>;
+		core-clock = <80000000>;
+		core-divider = <1>;
+		fast-bus-divider = <1>;
+		slow-bus-divider = <2>;
 		status = "okay";
 	};
 
@@ -43,29 +47,39 @@
 	soc {
 		flash0: flash@0 {
 			compatible = "soc-nv-flash";
-			reg = <0x00000000 0x40000>;
+			reg = <0x00000000 0x80000>;
 		};
 
-		sram0: memory@20000000 {
+		sram0: memory@1fff8000 {
 			compatible = "mmio-sram";
-			reg = <0x20000000 0x8000>;
+			reg = <0x1fff8000 0x10000>;
 		};
 
-		uart0: uart@4001b000 { 
+		uart0: uart@4001b000 {
 			compatible = "ytmicro,ytm32-uart";
 			reg = <0x4001b000 0x1000>;
 			interrupts = <31 0>;
-			clocks = <&cgu YTM32_CLOCK_UART0>;
+			clocks = <&cgu YTM32_CLOCK_LINFLEXD0>;
 			ytmicro,functional-clock-source = <YTM32_CLOCK_SRC_FXOSC>;
 			ytmicro,functional-clock-divider = <1>;
 			status = "disabled";
 		};
 
-		uart1: uart@4001c000 { 
+		uart1: uart@4001c000 {
 			compatible = "ytmicro,ytm32-uart";
 			reg = <0x4001c000 0x1000>;
-			interrupts = <33 0>; 
-			clocks = <&cgu YTM32_CLOCK_UART1>;
+			interrupts = <33 0>;
+			clocks = <&cgu YTM32_CLOCK_LINFLEXD1>;
+			ytmicro,functional-clock-source = <YTM32_CLOCK_SRC_FXOSC>;
+			ytmicro,functional-clock-divider = <1>;
+			status = "disabled";
+		};
+
+		uart2: uart@4001d000 {
+			compatible = "ytmicro,ytm32-uart";
+			reg = <0x4001d000 0x1000>;
+			interrupts = <35 0>;
+			clocks = <&cgu YTM32_CLOCK_LINFLEXD2>;
 			ytmicro,functional-clock-source = <YTM32_CLOCK_SRC_FXOSC>;
 			ytmicro,functional-clock-divider = <1>;
 			status = "disabled";
