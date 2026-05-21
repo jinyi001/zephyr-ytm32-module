@@ -1,0 +1,1 @@
+zephyr_library_sources_ifdef(CONFIG_SPI_YTM32 spi_ytm32.c)

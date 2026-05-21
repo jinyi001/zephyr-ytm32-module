@@ -8,6 +8,33 @@ properties:
   "#clock-cells":
     const: 1
 
+  system-clock-source:
+    type: int
+    required: false
+    default: 0
+    description: |
+      System clock source selector. Use YTM32_SYSTEM_CLOCK_SRC_* values from
+      the active SoC clock binding.
+
+  fxosc-frequency:
+    type: int
+    required: false
+    description: |
+      External fast oscillator frequency in Hz. Required when
+      system-clock-source selects FXOSC or PLL sourced from FXOSC.
+
+  fxosc-bypass:
+    type: boolean
+    description: |
+      Enable FXOSC bypass mode for an externally driven clock input.
+
+  fxosc-gain-selection:
+    type: int
+    required: false
+    default: 6
+    description: |
+      FXOSC gain selection value passed to the vendor SCU configuration.
+
   core-clock:
     type: int
     required: true

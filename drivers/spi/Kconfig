@@ -1,0 +1,14 @@
+config SPI_YTM32
+	bool "YTM32 SPI driver"
+	default y
+	depends on DT_HAS_YTMICRO_YTM32_SPI_ENABLED
+	select SPI
+	help
+	  Enable YTM32 SPI controller driver.
+
+config SPI_YTM32_TRANSFER_TIMEOUT_MS
+	int "YTM32 SPI transfer timeout in milliseconds"
+	default 1000
+	depends on SPI_YTM32
+	help
+	  Timeout used while waiting for an interrupt-driven SPI transfer to complete.

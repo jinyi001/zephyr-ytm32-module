@@ -1,0 +1,5 @@
+samples/build/
+samples/.cache/
+build/
+*.pyc
+__pycache__/

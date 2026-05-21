@@ -42,33 +42,33 @@ LOG_MODULE_REGISTER(gpio_ytm32, CONFIG_GPIO_LOG_LEVEL);
 #define GPIO_PIFR_OFFSET 0x1C  /* Port Interrupt Status Flag Reg   (W1C) */
 #define GPIO_PCR_OFFSET  0x80  /* Per-pin Control Register base    (RW)  */
 
-/* Per-pin register stride: PCR[n] is at GPIO_PCR_OFFSET + n * PCR_REG_STRIDE,
- * likewise PCTRL PCR[n] is at pctrl_base + n * PCR_REG_STRIDE.             */
-#define PCR_REG_STRIDE   4U
+/* Per-pin register stride: PCR[n] is at GPIO_PCR_OFFSET + n * YTM32_GPIO_PCR_REG_STRIDE,
+ * likewise PCTRL PCR[n] is at pctrl_base + n * YTM32_GPIO_PCR_REG_STRIDE.             */
+#define YTM32_GPIO_PCR_REG_STRIDE   4U
 
 /* ---------------------------------------------------------------------------
  * GPIO PCR register fields (RM §6.2.1.9, Table 6.10)
  * ---------------------------------------------------------------------------*/
-#define GPIO_PCR_INVE_BIT   4U     /* Invert Enable (bit 4)           */
-#define GPIO_PCR_IRQC_MASK  0xFU   /* Interrupt Configuration [3:0]   */
-#define GPIO_PCR_IRQC_SHIFT 0U
+#define YTM32_GPIO_PCR_INVE_BIT   4U     /* Invert Enable (bit 4)           */
+#define YTM32_GPIO_PCR_IRQC_MASK  0xFU   /* Interrupt Configuration [3:0]   */
+#define YTM32_GPIO_PCR_IRQC_SHIFT 0U
 
 /* IRQC field encodings (RM §6.2.1.9) */
-#define IRQC_DISABLED       0x0U   /* Interrupt disabled              */
-#define IRQC_INT_LOGIC_ZERO 0x8U   /* Interrupt when logic 0          */
-#define IRQC_INT_RISING     0x9U   /* Interrupt on rising-edge        */
-#define IRQC_INT_FALLING    0xAU   /* Interrupt on falling-edge       */
-#define IRQC_INT_EITHER     0xBU   /* Interrupt on either edge        */
-#define IRQC_INT_LOGIC_ONE  0xCU   /* Interrupt when logic 1          */
+#define YTM32_GPIO_IRQC_DISABLED       0x0U   /* Interrupt disabled              */
+#define YTM32_GPIO_IRQC_INT_LOGIC_ZERO 0x8U   /* Interrupt when logic 0          */
+#define YTM32_GPIO_IRQC_INT_RISING     0x9U   /* Interrupt on rising-edge        */
+#define YTM32_GPIO_IRQC_INT_FALLING    0xAU   /* Interrupt on falling-edge       */
+#define YTM32_GPIO_IRQC_INT_EITHER     0xBU   /* Interrupt on either edge        */
+#define YTM32_GPIO_IRQC_INT_LOGIC_ONE  0xCU   /* Interrupt when logic 1          */
 
 /* ---------------------------------------------------------------------------
  * PCTRL PCR register fields — pin mux control (RM §7.3.1.1, Table 7.3)
  * ---------------------------------------------------------------------------*/
-#define PCTRL_PCR_PE_BIT     1U      /* Pull Enable                      */
-#define PCTRL_PCR_PS_BIT     0U      /* Pull Select (0=down, 1=up)       */
-#define PCTRL_PCR_MUX_MASK   0x700U  /* Port Function Selection [10:8] */
-#define PCTRL_PCR_MUX_SHIFT  8U
-#define PCTRL_MUX_AS_GPIO    1U      /* Alternative 1 = GPIO function  */
+#define YTM32_GPIO_PCTRL_PCR_PE_BIT     1U      /* Pull Enable                      */
+#define YTM32_GPIO_PCTRL_PCR_PS_BIT     0U      /* Pull Select (0=down, 1=up)       */
+#define YTM32_GPIO_PCTRL_PCR_MUX_MASK   0x700U  /* Port Function Selection [10:8] */
+#define YTM32_GPIO_PCTRL_PCR_MUX_SHIFT  8U
+#define YTM32_GPIO_PCTRL_MUX_AS_GPIO    1U      /* Alternative 1 = GPIO function  */
 
 struct gpio_ytm32_config {
 	/* gpio_driver_config needs to be first */
@@ -126,26 +126,26 @@ static int gpio_ytm32_configure(const struct device *dev,
 	/* Set pin mux to GPIO mode (mux=1) via PCTRL->PCR[pin] */
 	{
 		uintptr_t pctrl_base = cfg->pctrl_base;
-		uint32_t pcr = sys_read32(pctrl_base + pin * PCR_REG_STRIDE);
-		pcr &= ~PCTRL_PCR_MUX_MASK;
-		pcr |= (PCTRL_MUX_AS_GPIO << PCTRL_PCR_MUX_SHIFT) & PCTRL_PCR_MUX_MASK;
-		sys_write32(pcr, pctrl_base + pin * PCR_REG_STRIDE);
+		uint32_t pcr = sys_read32(pctrl_base + pin * YTM32_GPIO_PCR_REG_STRIDE);
+		pcr &= ~YTM32_GPIO_PCTRL_PCR_MUX_MASK;
+		pcr |= (YTM32_GPIO_PCTRL_MUX_AS_GPIO << YTM32_GPIO_PCTRL_PCR_MUX_SHIFT) & YTM32_GPIO_PCTRL_PCR_MUX_MASK;
+		sys_write32(pcr, pctrl_base + pin * YTM32_GPIO_PCR_REG_STRIDE);
 	}
 
 	/* Configure pull-up / pull-down via PCTRL PCR[pin] */
 	{
 		uintptr_t pctrl_base = cfg->pctrl_base;
-		uint32_t pcr = sys_read32(pctrl_base + pin * PCR_REG_STRIDE);
+		uint32_t pcr = sys_read32(pctrl_base + pin * YTM32_GPIO_PCR_REG_STRIDE);
 
-		pcr &= ~(BIT(PCTRL_PCR_PE_BIT) | BIT(PCTRL_PCR_PS_BIT));
+		pcr &= ~(BIT(YTM32_GPIO_PCTRL_PCR_PE_BIT) | BIT(YTM32_GPIO_PCTRL_PCR_PS_BIT));
 
 		if ((flags & GPIO_PULL_UP) != 0) {
-			pcr |= BIT(PCTRL_PCR_PE_BIT) | BIT(PCTRL_PCR_PS_BIT);
+			pcr |= BIT(YTM32_GPIO_PCTRL_PCR_PE_BIT) | BIT(YTM32_GPIO_PCTRL_PCR_PS_BIT);
 		} else if ((flags & GPIO_PULL_DOWN) != 0) {
-			pcr |= BIT(PCTRL_PCR_PE_BIT);
+			pcr |= BIT(YTM32_GPIO_PCTRL_PCR_PE_BIT);
 		}
 
-		sys_write32(pcr, pctrl_base + pin * PCR_REG_STRIDE);
+		sys_write32(pcr, pctrl_base + pin * YTM32_GPIO_PCR_REG_STRIDE);
 	}
 
 	if ((flags & GPIO_OUTPUT) != 0) {
@@ -241,7 +241,7 @@ static int gpio_ytm32_pin_interrupt_configure(const struct device *dev,
 	struct gpio_ytm32_data *data = dev->data;
 	uintptr_t base = cfg->base;
 	uint32_t pcr;
-	uint32_t irqc = IRQC_DISABLED;
+	uint32_t irqc = YTM32_GPIO_IRQC_DISABLED;
 	bool clear_pending = true;
 #ifdef CONFIG_GPIO_ENABLE_DISABLE_INTERRUPT
 	bool fire_pending = false;
@@ -255,7 +255,7 @@ static int gpio_ytm32_pin_interrupt_configure(const struct device *dev,
 		clear_pending = false;
 	} else if (mode == GPIO_INT_MODE_ENABLE_ONLY) {
 		irqc = data->irqc_cache[pin];
-		if (irqc == IRQC_DISABLED) {
+		if (irqc == YTM32_GPIO_IRQC_DISABLED) {
 			return 0;
 		}
 		clear_pending = false;
@@ -265,13 +265,13 @@ static int gpio_ytm32_pin_interrupt_configure(const struct device *dev,
 	{
 		switch (mode) {
 		case GPIO_INT_MODE_DISABLED:
-			data->irqc_cache[pin] = IRQC_DISABLED;
+			data->irqc_cache[pin] = YTM32_GPIO_IRQC_DISABLED;
 			break;
 		case GPIO_INT_MODE_LEVEL:
 			if (trig == GPIO_INT_TRIG_LOW) {
-				irqc = IRQC_INT_LOGIC_ZERO;
+				irqc = YTM32_GPIO_IRQC_INT_LOGIC_ZERO;
 			} else if (trig == GPIO_INT_TRIG_HIGH) {
-				irqc = IRQC_INT_LOGIC_ONE;
+				irqc = YTM32_GPIO_IRQC_INT_LOGIC_ONE;
 			} else {
 				/* Both-level not supported */
 				return -ENOTSUP;
@@ -280,11 +280,11 @@ static int gpio_ytm32_pin_interrupt_configure(const struct device *dev,
 			break;
 		case GPIO_INT_MODE_EDGE:
 			if (trig == GPIO_INT_TRIG_LOW) {
-				irqc = IRQC_INT_FALLING;
+				irqc = YTM32_GPIO_IRQC_INT_FALLING;
 			} else if (trig == GPIO_INT_TRIG_HIGH) {
-				irqc = IRQC_INT_RISING;
+				irqc = YTM32_GPIO_IRQC_INT_RISING;
 			} else {
-				irqc = IRQC_INT_EITHER;
+				irqc = YTM32_GPIO_IRQC_INT_EITHER;
 			}
 			data->irqc_cache[pin] = irqc;
 			break;
@@ -294,10 +294,10 @@ static int gpio_ytm32_pin_interrupt_configure(const struct device *dev,
 	}
 
 	/* Write IRQC to GPIO PCR[pin] */
-	pcr = sys_read32(base + GPIO_PCR_OFFSET + pin * PCR_REG_STRIDE);
-	pcr &= ~GPIO_PCR_IRQC_MASK;
-	pcr |= (irqc << GPIO_PCR_IRQC_SHIFT) & GPIO_PCR_IRQC_MASK;
-	sys_write32(pcr, base + GPIO_PCR_OFFSET + pin * PCR_REG_STRIDE);
+	pcr = sys_read32(base + GPIO_PCR_OFFSET + pin * YTM32_GPIO_PCR_REG_STRIDE);
+	pcr &= ~YTM32_GPIO_PCR_IRQC_MASK;
+	pcr |= (irqc << YTM32_GPIO_PCR_IRQC_SHIFT) & YTM32_GPIO_PCR_IRQC_MASK;
+	sys_write32(pcr, base + GPIO_PCR_OFFSET + pin * YTM32_GPIO_PCR_REG_STRIDE);
 
 	if (clear_pending) {
 		gpio_reg_write(base, GPIO_PIFR_OFFSET, BIT(pin));

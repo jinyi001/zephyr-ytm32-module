@@ -11,12 +11,10 @@
 #endif
 #include "clock.h"
 #include <zephyr/init.h>
-#include <zephyr/dt-bindings/clock/ytmicro,ytm32-clock.h>
+#include <zephyr/dt-bindings/clock/ytmicro,ytm32-soc-clock.h>
 #include <zephyr/drivers/clock_control/ytm32_soc_clock.h>
 
-/* YTM32_FIRC_HZ and YTM32_FXOSC_HZ are now defined in the shared
- * dt-bindings header <zephyr/dt-bindings/clock/ytmicro,ytm32-clock.h>.
- */
+/* YTM32_FIRC_HZ and YTM32_FXOSC_HZ are provided by the active SoC clock binding. */
 
 #define YTM32_CLOCK_CONFIG_COUNT 1U
 #define YTM32_CLOCK_CONFIG_INDEX 0U
@@ -63,15 +61,39 @@ static bool ytm32_divider_to_sys_div(uint32_t divider, uint8_t *sys_div)
 	return true;
 }
 
+static int ytm32_system_clock_source_hz(const struct ytm32_soc_clock_config *cfg,
+					 uint32_t *source_hz,
+					 scu_system_clock_src_t *scu_source)
+{
+	if ((cfg == NULL) || (source_hz == NULL) || (scu_source == NULL)) {
+		return -EINVAL;
+	}
+
+	switch (cfg->system_clock_source) {
+	case YTM32_SYSTEM_CLOCK_SRC_FIRC:
+		*source_hz = YTM32_FIRC_HZ;
+		*scu_source = SCU_SYSTEM_CLOCK_SRC_FIRC;
+		return 0;
+	case YTM32_SYSTEM_CLOCK_SRC_FXOSC:
+		if (cfg->fxosc_frequency == 0U) {
+			return -EINVAL;
+		}
+		*source_hz = cfg->fxosc_frequency;
+		*scu_source = SCU_SYSTEM_CLOCK_SRC_FXOSC;
+		return 0;
+	case YTM32_SYSTEM_CLOCK_SRC_PLL:
+		return -ENOTSUP;
+	default:
+		return -EINVAL;
+	}
+}
+
 void soc_early_init_hook(void)
 {
 	SystemInit();
 }
 
-int ytm32_soc_apply_clock_config(uint32_t core_clock,
-				  uint32_t core_divider,
-				  uint32_t fast_bus_divider,
-				  uint32_t slow_bus_divider)
+int ytm32_soc_apply_clock_config(const struct ytm32_soc_clock_config *cfg)
 {
 	scu_config_t scu_config = {
 		.fircEnable = true,
@@ -108,20 +130,34 @@ int ytm32_soc_apply_clock_config(uint32_t core_clock,
 		&clock_config,
 	};
 	status_t status;
+	uint32_t source_hz;
+	scu_system_clock_src_t scu_source;
+	int ret;
 
-	if (core_clock != YTM32_FIRC_HZ) {
+	ret = ytm32_system_clock_source_hz(cfg, &source_hz, &scu_source);
+	if (ret < 0) {
+		return ret;
+	}
+
+	if (cfg->core_clock != (source_hz / cfg->core_divider)) {
 		return -EINVAL;
 	}
 
-	if (!ytm32_divider_to_sys_div(core_divider, &scu_config.sysDiv)) {
+	scu_config.sysClkSrc = scu_source;
+	scu_config.fxoscConfig.enable = (cfg->system_clock_source != YTM32_SYSTEM_CLOCK_SRC_FIRC);
+	scu_config.fxoscConfig.bypassMode = cfg->fxosc_bypass;
+	scu_config.fxoscConfig.gainSelection = cfg->fxosc_gain_selection;
+	scu_config.fxoscConfig.frequency = cfg->fxosc_frequency;
+
+	if (!ytm32_divider_to_sys_div(cfg->core_divider, &scu_config.sysDiv)) {
 		return -EINVAL;
 	}
 
-	if (!ytm32_divider_to_sys_div(fast_bus_divider, &scu_config.fastBusDiv)) {
+	if (!ytm32_divider_to_sys_div(cfg->fast_bus_divider, &scu_config.fastBusDiv)) {
 		return -EINVAL;
 	}
 
-	if (!ytm32_divider_to_sys_div(slow_bus_divider, &scu_config.slowBusDiv)) {
+	if (!ytm32_divider_to_sys_div(cfg->slow_bus_divider, &scu_config.slowBusDiv)) {
 		return -EINVAL;
 	}
 

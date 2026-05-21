@@ -1,0 +1,36 @@
+description: YTMicro YTM32 SPI controller
+
+compatible: "ytmicro,ytm32-spi"
+
+include: [spi-controller.yaml, pinctrl-device.yaml]
+
+properties:
+  reg:
+    required: true
+
+  interrupts:
+    required: true
+
+  clocks:
+    type: phandle-array
+    required: true
+    description: SPI peripheral clock specifier from the CGU.
+
+  ytmicro,functional-clock-source:
+    type: int
+    required: true
+    description: Functional clock source passed to the YTM32 clock controller.
+
+  ytmicro,functional-clock-divider:
+    type: int
+    required: false
+    default: 1
+    description: Functional clock divider passed to the YTM32 clock controller.
+
+  pinctrl-0:
+    type: phandles
+    required: false
+
+  pinctrl-names:
+    type: string-array
+    required: false

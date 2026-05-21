@@ -1,6 +1,8 @@
 /*
  * Copyright (c) 2026 YTMicro
  * SPDX-License-Identifier: Apache-2.0
+ *
+ * Clock binding for YTM32B1MC0 (MC series).
  */
 
 #ifndef ZEPHYR_INCLUDE_DT_BINDINGS_CLOCK_YTM32B1MC0_CLOCK_H_
@@ -64,5 +66,9 @@
 /* Fixed oscillator frequencies (Hz) */
 #define YTM32_FIRC_HZ                    80000000U
 #define YTM32_FXOSC_HZ                   24000000U
+
+#define YTM32_SYSTEM_CLOCK_SRC_FIRC      0U
+#define YTM32_SYSTEM_CLOCK_SRC_FXOSC     1U
+#define YTM32_SYSTEM_CLOCK_SRC_PLL       2U
 
 #endif /* ZEPHYR_INCLUDE_DT_BINDINGS_CLOCK_YTM32B1MC0_CLOCK_H_ */

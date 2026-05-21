@@ -14,7 +14,7 @@ LOG_MODULE_REGISTER(clock_control_ytm32, CONFIG_CLOCK_CONTROL_LOG_LEVEL);
 #include <zephyr/device.h>
 #include <zephyr/spinlock.h>
 #include <zephyr/sys/util.h>
-#include <zephyr/dt-bindings/clock/ytmicro,ytm32-clock.h>
+#include <zephyr/dt-bindings/clock/ytmicro,ytm32-soc-clock.h>
 
 /* Driver-private constants — not part of the dt-binding public API */
 #define YTM32_IPC_DIV_MIN 1U
@@ -60,10 +60,7 @@ extern void CLOCK_DRV_SetModuleClock(uint32_t clockName, bool clockGate,
 extern int CLOCK_SYS_GetFreq(uint32_t clockName, uint32_t *frequency);
 
 struct clock_control_ytm32_config {
-	uint32_t core_clock;
-	uint32_t core_divider;
-	uint32_t fast_bus_divider;
-	uint32_t slow_bus_divider;
+	struct ytm32_soc_clock_config soc_clock;
 };
 
 struct clock_control_ytm32_data {
@@ -88,6 +85,12 @@ static const struct ytm32_module_clock_config ytm32_fixed_module_clocks[] = {
 	{ YTM32_CLOCK_PCTRLC, YTM32_CLOCK_SRC_FIRC, 1U },
 	{ YTM32_CLOCK_PCTRLD, YTM32_CLOCK_SRC_FIRC, 1U },
 	{ YTM32_CLOCK_PCTRLE, YTM32_CLOCK_SRC_FIRC, 1U },
+	{ YTM32_CLOCK_SPI0, YTM32_CLOCK_SRC_FIRC, 1U },
+	{ YTM32_CLOCK_SPI1, YTM32_CLOCK_SRC_FIRC, 1U },
+	{ YTM32_CLOCK_SPI2, YTM32_CLOCK_SRC_FIRC, 1U },
+#if defined(YTM32_CLOCK_SPI3)
+	{ YTM32_CLOCK_SPI3, YTM32_CLOCK_SRC_FIRC, 1U },
+#endif
 };
 
 #define YTM32_DT_FUNCTIONAL_CLOCK_ENTRY(node_id) \
@@ -130,30 +133,74 @@ static const struct ytm32_module_clock_config *ytm32_find_module_clock(uint32_t 
 
 static const char *const ytm32_clock_labels[] = {
 	[YTM32_CLOCK_DMA] = "dma",
+#if defined(YTM32_CLOCK_TRACE)
+	[YTM32_CLOCK_TRACE] = "trace",
+#endif
+#if defined(YTM32_CLOCK_EFM)
+	[YTM32_CLOCK_EFM] = "efm",
+#endif
 	[YTM32_CLOCK_GPIO] = "gpio",
 	[YTM32_CLOCK_PCTRLA] = "pctrla",
 	[YTM32_CLOCK_PCTRLB] = "pctrlb",
 	[YTM32_CLOCK_PCTRLC] = "pctrlc",
 	[YTM32_CLOCK_PCTRLD] = "pctrld",
 	[YTM32_CLOCK_PCTRLE] = "pctrle",
+#if defined(CONFIG_SOC_YTM32B1MD1)
+	[YTM32_CLOCK_LINFLEXD0] = "linflexd0",
+	[YTM32_CLOCK_LINFLEXD1] = "linflexd1",
+	[YTM32_CLOCK_LINFLEXD2] = "linflexd2",
+#else
 	[YTM32_CLOCK_UART0] = "uart0",
 	[YTM32_CLOCK_UART1] = "uart1",
 	[YTM32_CLOCK_UART2] = "uart2",
+#endif
+#if defined(YTM32_CLOCK_SENT0)
+	[YTM32_CLOCK_SENT0] = "sent0",
+#endif
 	[YTM32_CLOCK_I2C0] = "i2c0",
 	[YTM32_CLOCK_I2C1] = "i2c1",
 	[YTM32_CLOCK_SPI0] = "spi0",
 	[YTM32_CLOCK_SPI1] = "spi1",
 	[YTM32_CLOCK_SPI2] = "spi2",
+#if defined(YTM32_CLOCK_SPI3)
+	[YTM32_CLOCK_SPI3] = "spi3",
+#endif
 	[YTM32_CLOCK_FLEXCAN0] = "flexcan0",
 	[YTM32_CLOCK_FLEXCAN1] = "flexcan1",
+#if defined(YTM32_CLOCK_FLEXCAN2)
+	[YTM32_CLOCK_FLEXCAN2] = "flexcan2",
+#endif
 	[YTM32_CLOCK_ADC0] = "adc0",
 	[YTM32_CLOCK_ACMP0] = "acmp0",
+#if defined(YTM32_CLOCK_PTU0)
+	[YTM32_CLOCK_PTU0] = "ptu0",
+#endif
 	[YTM32_CLOCK_TMU] = "tmu",
 	[YTM32_CLOCK_ETMR0] = "etmr0",
 	[YTM32_CLOCK_ETMR1] = "etmr1",
+#if defined(YTM32_CLOCK_ETMR2)
+	[YTM32_CLOCK_ETMR2] = "etmr2",
+#endif
+#if defined(YTM32_CLOCK_ETMR3)
+	[YTM32_CLOCK_ETMR3] = "etmr3",
+#endif
+#if defined(YTM32_CLOCK_MPWM0)
 	[YTM32_CLOCK_MPWM0] = "mpwm0",
+#endif
+#if defined(YTM32_CLOCK_TMR0)
+	[YTM32_CLOCK_TMR0] = "tmr0",
+#endif
 	[YTM32_CLOCK_PTMR0] = "ptmr0",
 	[YTM32_CLOCK_LPTMR0] = "lptmr0",
+#if defined(YTM32_CLOCK_RTC)
+	[YTM32_CLOCK_RTC] = "rtc",
+#endif
+#if defined(YTM32_CLOCK_REGFILE)
+	[YTM32_CLOCK_REGFILE] = "regfile",
+#endif
+#if defined(YTM32_CLOCK_WKU)
+	[YTM32_CLOCK_WKU] = "wku",
+#endif
 	[YTM32_CLOCK_CRC] = "crc",
 	[YTM32_CLOCK_TRNG] = "trng",
 	[YTM32_CLOCK_HCU] = "hcu",
@@ -163,6 +210,12 @@ static const char *const ytm32_clock_labels[] = {
 	[YTM32_CLOCK_STU] = "stu",
 	[YTM32_CLOCK_CIM] = "cim",
 	[YTM32_CLOCK_SCU] = "scu",
+#if defined(YTM32_CLOCK_PCU)
+	[YTM32_CLOCK_PCU] = "pcu",
+#endif
+#if defined(YTM32_CLOCK_RCU)
+	[YTM32_CLOCK_RCU] = "rcu",
+#endif
 	[YTM32_CLOCK_CORE] = "core",
 	[YTM32_CLOCK_FAST_BUS] = "fast_bus",
 	[YTM32_CLOCK_SLOW_BUS] = "slow_bus",
@@ -184,8 +237,15 @@ static bool ytm32_is_supported_module_source(uint32_t clk_src)
 	case YTM32_CLOCK_SRC_FIRC:
 	case YTM32_CLOCK_SRC_SIRC:
 	case YTM32_CLOCK_SRC_FXOSC:
+#if defined(YTM32_CLOCK_SRC_LPO)
 	case YTM32_CLOCK_SRC_LPO:
+#endif
+#if defined(YTM32_CLOCK_SRC_FAST_BUS)
 	case YTM32_CLOCK_SRC_FAST_BUS:
+#endif
+#if defined(YTM32_CLOCK_SRC_PLL)
+	case YTM32_CLOCK_SRC_PLL:
+#endif
 		return true;
 	default:
 		return false;
@@ -307,8 +367,9 @@ static int ytm32_refresh_system_rates(const struct device *dev)
 {
 	const struct clock_control_ytm32_config *cfg = dev->config;
 	struct clock_control_ytm32_data *data = dev->data;
-	uint32_t expected_fast_rate = cfg->core_clock / cfg->fast_bus_divider;
-	uint32_t expected_slow_rate = expected_fast_rate / cfg->slow_bus_divider;
+	const struct ytm32_soc_clock_config *soc_clock = &cfg->soc_clock;
+	uint32_t expected_fast_rate = soc_clock->core_clock / soc_clock->fast_bus_divider;
+	uint32_t expected_slow_rate = expected_fast_rate / soc_clock->slow_bus_divider;
 	int ret;
 
 	ret = ytm32_query_clock_rate(YTM32_CLOCK_CORE, "core",
@@ -329,9 +390,9 @@ static int ytm32_refresh_system_rates(const struct device *dev)
 		return ret;
 	}
 
-	if (data->core_rate != cfg->core_clock) {
+	if (data->core_rate != soc_clock->core_clock) {
 		LOG_ERR("Core clock mismatch: DTS %u Hz, HW %u Hz",
-			cfg->core_clock, data->core_rate);
+			soc_clock->core_clock, data->core_rate);
 		return -EIO;
 	}
 
@@ -470,10 +531,15 @@ static int clock_control_ytm32_get_rate(const struct device *dev, clock_control_
 		case YTM32_CLOCK_SRC_FIRC: src_clock_id = YTM32_CLOCK_IPC_FIRC; break;
 		case YTM32_CLOCK_SRC_SIRC: src_clock_id = YTM32_CLOCK_IPC_SIRC; break;
 		case YTM32_CLOCK_SRC_FXOSC: src_clock_id = YTM32_CLOCK_IPC_FXOSC; break;
-#if defined(YTM32_CLOCK_IPC_LPO)
+#if defined(YTM32_CLOCK_SRC_LPO) && defined(YTM32_CLOCK_IPC_LPO)
 		case YTM32_CLOCK_SRC_LPO: src_clock_id = YTM32_CLOCK_IPC_LPO; break;
 #endif
+#if defined(YTM32_CLOCK_SRC_FAST_BUS)
 		case YTM32_CLOCK_SRC_FAST_BUS: src_clock_id = YTM32_CLOCK_FAST_BUS; break;
+#endif
+#if defined(YTM32_CLOCK_SRC_PLL) && defined(YTM32_CLOCK_IPC_PLL)
+		case YTM32_CLOCK_SRC_PLL: src_clock_id = YTM32_CLOCK_IPC_PLL; break;
+#endif
 		default: src_clock_id = 0U; break;
 		}
 
@@ -509,43 +575,26 @@ static const struct clock_control_driver_api clock_control_ytm32_api = {
 static int clock_control_ytm32_init(const struct device *dev)
 {
 	const struct clock_control_ytm32_config *cfg = dev->config;
+	const struct ytm32_soc_clock_config *soc_clock = &cfg->soc_clock;
 	int ret;
 
-	if (cfg->core_clock != YTM32_FIRC_HZ) {
-		LOG_ERR("Unsupported core clock %u Hz, MVP supports fixed %u Hz FIRC only",
-			cfg->core_clock, YTM32_FIRC_HZ);
+	if ((soc_clock->fast_bus_divider == 0U) || (soc_clock->slow_bus_divider == 0U) ||
+	    (soc_clock->core_divider == 0U)) {
+		LOG_ERR("Missing YTM32 clock divider in DTS");
 		return -EINVAL;
 	}
 
-	if (cfg->fast_bus_divider != 1U) {
-		LOG_ERR("Unsupported fast bus divider %u, MVP-3 keeps fast bus fixed at 1",
-			cfg->fast_bus_divider);
-		return -EINVAL;
-	}
-
-	if (cfg->core_divider != 1U) {
-		LOG_ERR("Unsupported core divider %u, MVP profile keeps core divider fixed at 1",
-			cfg->core_divider);
-		return -EINVAL;
-	}
-
-	if (cfg->slow_bus_divider == 0U) {
-		LOG_ERR("Missing YTM32 slow bus divider in DTS");
-		return -EINVAL;
-	}
-
-	ret = ytm32_soc_apply_clock_config(cfg->core_clock,
-				  cfg->core_divider,
-				  cfg->fast_bus_divider,
-				  cfg->slow_bus_divider);
+	ret = ytm32_soc_apply_clock_config(soc_clock);
 	if (ret < 0) {
 		return ret;
 	}
 
-	LOG_INF("YTM32 CGU Initialized, Target Core Clock: %u Hz", cfg->core_clock);
-	LOG_INF("Core Divider: %u, Fast Bus Divider: %u, Slow Bus Divider: %u",
-		cfg->core_divider, cfg->fast_bus_divider, cfg->slow_bus_divider);
-	LOG_INF("YTM32 clock MVP locked to FIRC baseline without PLL");
+	LOG_INF("YTM32 CGU Initialized, Target Core Clock: %u Hz", soc_clock->core_clock);
+	LOG_INF("Clock Source: %u, Core Divider: %u, Fast Bus Divider: %u, Slow Bus Divider: %u",
+		soc_clock->system_clock_source, soc_clock->core_divider,
+		soc_clock->fast_bus_divider, soc_clock->slow_bus_divider);
+	LOG_INF("YTM32 FXOSC frequency: %u Hz%s", soc_clock->fxosc_frequency,
+		soc_clock->fxosc_bypass ? " (bypass)" : "");
 	LOG_INF("YTM32 low-power policy: SIRC deepsleep=%s standby=%s",
 		YTM32_SIRC_DEEPSLEEP_ENABLED ? "on" : "off",
 		YTM32_SIRC_STANDBY_ENABLED ? "on" : "off");
@@ -584,10 +633,16 @@ static int clock_control_ytm32_init(const struct device *dev)
 
 #define YTM32_CGU_INIT(n) \
 	static const struct clock_control_ytm32_config clock_control_ytm32_config_##n = { \
-		.core_clock = DT_INST_PROP(n, core_clock), \
-		.core_divider = DT_INST_PROP(n, core_divider), \
-		.fast_bus_divider = YTM32_DT_FAST_BUS_DIVIDER(n), \
-		.slow_bus_divider = YTM32_DT_SLOW_BUS_DIVIDER(n), \
+		.soc_clock = { \
+			.system_clock_source = DT_INST_PROP_OR(n, system_clock_source, YTM32_SYSTEM_CLOCK_SRC_FIRC), \
+			.fxosc_frequency = DT_INST_PROP_OR(n, fxosc_frequency, YTM32_FXOSC_HZ), \
+			.fxosc_bypass = DT_INST_PROP(n, fxosc_bypass), \
+			.fxosc_gain_selection = DT_INST_PROP_OR(n, fxosc_gain_selection, 6), \
+			.core_clock = DT_INST_PROP(n, core_clock), \
+			.core_divider = DT_INST_PROP(n, core_divider), \
+			.fast_bus_divider = YTM32_DT_FAST_BUS_DIVIDER(n), \
+			.slow_bus_divider = YTM32_DT_SLOW_BUS_DIVIDER(n), \
+		}, \
 	}; \
 	static struct clock_control_ytm32_data clock_control_ytm32_data_##n; \
 	DEVICE_DT_INST_DEFINE(n, clock_control_ytm32_init, NULL, &clock_control_ytm32_data_##n, &clock_control_ytm32_config_##n, \

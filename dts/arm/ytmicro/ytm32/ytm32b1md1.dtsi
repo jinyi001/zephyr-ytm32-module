@@ -26,7 +26,9 @@
 	cgu: cgu {
 		compatible = "ytmicro,ytm32-cgu";
 		#clock-cells = <1>;
-		core-clock = <80000000>;
+		system-clock-source = <YTM32_SYSTEM_CLOCK_SRC_FXOSC>;
+		fxosc-frequency = <16000000>;
+		core-clock = <16000000>;
 		core-divider = <1>;
 		fast-bus-divider = <1>;
 		slow-bus-divider = <2>;
@@ -104,7 +106,55 @@
 			status = "disabled";
 		};
 
-		gpioa: gpio@40011000 {
+		spi0: spi@4002a000 {
+				compatible = "ytmicro,ytm32-spi";
+				reg = <0x4002a000 0x1000>;
+				interrupts = <26 0>;
+				clocks = <&cgu YTM32_CLOCK_SPI0>;
+				ytmicro,functional-clock-source = <YTM32_CLOCK_SRC_FIRC>;
+				ytmicro,functional-clock-divider = <1>;
+				#address-cells = <1>;
+				#size-cells = <0>;
+				status = "disabled";
+			};
+
+			spi1: spi@4002b000 {
+				compatible = "ytmicro,ytm32-spi";
+				reg = <0x4002b000 0x1000>;
+				interrupts = <27 0>;
+				clocks = <&cgu YTM32_CLOCK_SPI1>;
+				ytmicro,functional-clock-source = <YTM32_CLOCK_SRC_FIRC>;
+				ytmicro,functional-clock-divider = <1>;
+				#address-cells = <1>;
+				#size-cells = <0>;
+				status = "disabled";
+			};
+
+			spi2: spi@4002c000 {
+				compatible = "ytmicro,ytm32-spi";
+				reg = <0x4002c000 0x1000>;
+				interrupts = <28 0>;
+				clocks = <&cgu YTM32_CLOCK_SPI2>;
+				ytmicro,functional-clock-source = <YTM32_CLOCK_SRC_FIRC>;
+				ytmicro,functional-clock-divider = <1>;
+				#address-cells = <1>;
+				#size-cells = <0>;
+				status = "disabled";
+			};
+
+			spi3: spi@4002d000 {
+				compatible = "ytmicro,ytm32-spi";
+				reg = <0x4002d000 0x1000>;
+				interrupts = <168 0>;
+				clocks = <&cgu YTM32_CLOCK_SPI3>;
+				ytmicro,functional-clock-source = <YTM32_CLOCK_SRC_FIRC>;
+				ytmicro,functional-clock-divider = <1>;
+				#address-cells = <1>;
+				#size-cells = <0>;
+				status = "disabled";
+			};
+
+			gpioa: gpio@40011000 {
 			compatible = "ytmicro,ytm32-gpio";
 			reg = <0x40011000 0x100>,  /* GPIO */
 			      <0x40012000 0x100>;  /* PCTRLA */

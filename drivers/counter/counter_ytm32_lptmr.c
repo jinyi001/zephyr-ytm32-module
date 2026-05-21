@@ -10,7 +10,7 @@
 #include <zephyr/device.h>
 #include <zephyr/drivers/clock_control.h>
 #include <zephyr/drivers/counter.h>
-#include <zephyr/dt-bindings/clock/ytmicro,ytm32-clock.h>
+#include <zephyr/dt-bindings/clock/ytmicro,ytm32-soc-clock.h>
 #include <zephyr/irq.h>
 #include <zephyr/spinlock.h>
 #include <zephyr/sys/sys_io.h>
@@ -50,6 +50,7 @@
 	BUILD_ASSERT((uint32_t)(addr) == YTM32_LPTMR_BASE, \
 		     "LPTMR reg address does not match LPTMR0")
 
+#if defined(YTM32_CLOCK_SRC_LPO)
 #define YTM32_LPTMR_CLOCK_SOURCE_VALID(src) \
 	(((src) == YTM32_CLOCK_SRC_FIRC) || ((src) == YTM32_CLOCK_SRC_SIRC) || \
 	 ((src) == YTM32_CLOCK_SRC_FXOSC) || ((src) == YTM32_CLOCK_SRC_LPO))
@@ -59,6 +60,16 @@
 	 ((src) == YTM32_CLOCK_SRC_SIRC ? YTM32_LPTMR_CLOCK_SEL_SIRC : \
 	  ((src) == YTM32_CLOCK_SRC_FXOSC ? YTM32_LPTMR_CLOCK_SEL_FXOSC : \
 	   YTM32_LPTMR_CLOCK_SEL_LPO)))
+#else
+#define YTM32_LPTMR_CLOCK_SOURCE_VALID(src) \
+	(((src) == YTM32_CLOCK_SRC_FIRC) || ((src) == YTM32_CLOCK_SRC_SIRC) || \
+	 ((src) == YTM32_CLOCK_SRC_FXOSC))
+
+#define YTM32_LPTMR_CLOCK_SOURCE_SELECT(src) \
+	((src) == YTM32_CLOCK_SRC_FIRC ? YTM32_LPTMR_CLOCK_SEL_FIRC : \
+	 ((src) == YTM32_CLOCK_SRC_SIRC ? YTM32_LPTMR_CLOCK_SEL_SIRC : \
+	  YTM32_LPTMR_CLOCK_SEL_FXOSC))
+#endif
 
 struct ytm32_lptmr_config {
 	struct counter_config_info info;
