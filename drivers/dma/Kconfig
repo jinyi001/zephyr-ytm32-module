@@ -1,0 +1,9 @@
+config DMA_YTM32
+	bool "YTM32 DMA controller driver"
+	default y
+	depends on DT_HAS_YTMICRO_YTM32_DMA_ENABLED
+	select DMA
+	help
+	  Enable DMA driver for YTM32 series. Provides the Zephyr DMA API
+	  and connects all per-channel IRQ handlers required by peripherals
+	  (SPI, UART, I2C) that use DMA mode through the vendor HAL.

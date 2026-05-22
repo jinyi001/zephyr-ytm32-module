@@ -80,6 +80,17 @@
 			status = "disabled";
 		};
 
+		adc0: adc@40040000 {
+			compatible = "ytmicro,ytm32-adc";
+			reg = <0x40040000 0x58>;
+			interrupts = <39 0>;
+			clocks = <&cgu YTM32_CLOCK_ADC0>;
+			ytmicro,functional-clock-source = <YTM32_CLOCK_SRC_FXOSC>;
+			ytmicro,functional-clock-divider = <3>;
+			#io-channel-cells = <1>;
+			status = "disabled";
+		};
+
 		lptmr0: lptmr@4005d000 {
 			compatible = "ytmicro,ytm32-lptmr";
 			reg = <0x4005d000 0x1000>;

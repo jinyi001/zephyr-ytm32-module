@@ -1,0 +1,5 @@
+if(CONFIG_ADC_YTM32)
+  zephyr_library()
+  zephyr_library_sources(adc_ytm32.c)
+  zephyr_library_include_directories(${ZEPHYR_BASE}/drivers/adc)
+endif()

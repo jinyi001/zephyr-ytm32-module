@@ -1,0 +1,32 @@
+description: YTMicro YTM32 DMA controller
+
+compatible: "ytmicro,ytm32-dma"
+
+include: [dma-controller.yaml]
+
+properties:
+  reg:
+    required: true
+
+  interrupts:
+    required: true
+    description: |
+      Sixteen per-channel IRQs (DMA0..DMA15, indices 0-15) followed by
+      one shared error IRQ (index 16). All 17 must be listed in order.
+
+  clocks:
+    type: phandle-array
+    required: true
+    description: DMA clock gate from the CGU.
+
+  dma-channels:
+    type: int
+    required: true
+    description: Total number of DMA virtual channels.
+
+  "#dma-cells":
+    const: 2
+
+dma-cells:
+  - channel   # Virtual channel number (0 to dma-channels - 1)
+  - trigsrc   # DMAMUX request source (dma_request_source_t from YTM32B1MD1_features.h)

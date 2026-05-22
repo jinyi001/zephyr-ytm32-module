@@ -7,24 +7,31 @@
 
 #include <errno.h>
 
+#define LOG_LEVEL CONFIG_SPI_LOG_LEVEL
+#include <zephyr/logging/log.h>
+LOG_MODULE_REGISTER(spi_ytm32);
+
+#include "spi_context.h"
+
 #include <zephyr/device.h>
 #include <zephyr/drivers/clock_control.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/pinctrl.h>
 #include <zephyr/drivers/spi.h>
+#include <zephyr/drivers/spi/rtio.h>
 #include <zephyr/kernel.h>
-#include <zephyr/logging/log.h>
-#include <zephyr/sys/printk.h>
 #include <zephyr/sys/util.h>
 
-#define spi_callback_t hal_spi_callback_t
-#include "spi_master_driver.h"
-#undef spi_callback_t
-
-LOG_MODULE_REGISTER(spi_ytm32, CONFIG_SPI_LOG_LEVEL);
+/* Vendor types are fully hidden behind this wrapper header. */
+#include "ytm32_spi_hal.h"
 
 #define YTM32_SPI_INSTANCE_STRIDE 0x1000U
-#define YTM32_SPI_TRANSFER_CHUNK 32U
+
+/*
+ * NULL spi_buf segments (dummy TX / discard RX) are sub-segmented at this
+ * size because the module-level dummy arrays are bounded to this length.
+ */
+#define YTM32_SPI_DUMMY_LEN 64U
 
 #define YTM32_SPI_INSTANCE_FROM_ADDR(addr) \
 	((((uint32_t)(addr)) - ((uint32_t)SPI0_BASE)) / YTM32_SPI_INSTANCE_STRIDE)
@@ -43,165 +50,81 @@ struct spi_ytm32_config {
 	clock_control_subsys_t clock_subsys;
 	const struct pinctrl_dev_config *pincfg;
 	void (*irq_config_func)(void);
+#ifdef CONFIG_SPI_YTM32_DMA
+	const struct device *dma_dev;
+	uint8_t dma_tx_chan;
+	uint8_t dma_rx_chan;
+#endif
 };
 
 struct spi_ytm32_data {
-	struct k_mutex lock;
-	struct k_sem done;
-	spi_state_t hal_state;
-	volatile status_t transfer_status;
+	struct spi_context ctx;      /* bus lock, config cache, CS control */
+	volatile int hal_result;     /* transfer outcome set by HAL callback */
+	struct k_sem done;           /* signals transfer completion from ISR */
+#ifdef CONFIG_SPI_YTM32_DMA
+	bool    dma_active;
+	uint8_t dma_tx_chan;
+	uint8_t dma_rx_chan;
+#endif
 };
 
-struct spi_ytm32_buf_cursor {
-	const struct spi_buf_set *set;
-	size_t index;
-	size_t offset;
+/*
+ * 0xFF dummy TX: devices that inspect MOSI during dummy clocks see the
+ * de-selected idle pattern rather than 0x00.
+ * dummy_rx is write-only discard; shared across SPI instances is safe
+ * because its contents are never read back.
+ */
+static const uint8_t dummy_tx[YTM32_SPI_DUMMY_LEN] = {
+	[0 ... (YTM32_SPI_DUMMY_LEN - 1)] = 0xFF
 };
+static uint8_t dummy_rx[YTM32_SPI_DUMMY_LEN];
 
-static int spi_ytm32_status_to_errno(status_t status)
-{
-	switch (status) {
-	case STATUS_SUCCESS:
-		return 0;
-	case STATUS_BUSY:
-		return -EBUSY;
-	case STATUS_TIMEOUT:
-		return -ETIMEDOUT;
-	default:
-		return -EIO;
-	}
-}
+/* ─────────────────────────── HAL callback ─────────────────────────── */
 
-static size_t spi_ytm32_buf_set_len(const struct spi_buf_set *set)
-{
-	size_t len = 0;
-
-	if (set == NULL) {
-		return 0;
-	}
-
-	for (size_t i = 0; i < set->count; i++) {
-		len += set->buffers[i].len;
-	}
-
-	return len;
-}
-
-static uint8_t spi_ytm32_buf_cursor_get(struct spi_ytm32_buf_cursor *cursor)
-{
-	const struct spi_buf *buf;
-	const uint8_t *data;
-
-	while ((cursor->set != NULL) && (cursor->index < cursor->set->count)) {
-		buf = &cursor->set->buffers[cursor->index];
-		if (cursor->offset < buf->len) {
-			data = buf->buf;
-			return data != NULL ? data[cursor->offset++] : 0xff;
-		}
-		cursor->index++;
-		cursor->offset = 0;
-	}
-
-	return 0xff;
-}
-
-static void spi_ytm32_buf_cursor_put(struct spi_ytm32_buf_cursor *cursor, uint8_t value)
-{
-	const struct spi_buf *buf;
-	uint8_t *data;
-
-	while ((cursor->set != NULL) && (cursor->index < cursor->set->count)) {
-		buf = &cursor->set->buffers[cursor->index];
-		if (cursor->offset < buf->len) {
-			data = buf->buf;
-			if (data != NULL) {
-				data[cursor->offset] = value;
-			}
-			cursor->offset++;
-			return;
-		}
-		cursor->index++;
-		cursor->offset = 0;
-	}
-}
-
-static void spi_ytm32_hal_callback(void *driver_state, spi_event_t event, void *user_data)
+static void spi_ytm32_hal_cb(void *user_data, int status)
 {
 	struct spi_ytm32_data *data = user_data;
 
-	ARG_UNUSED(driver_state);
-
-	if (event == SPI_EVENT_END_TRANSFER) {
-		data->transfer_status = STATUS_SUCCESS;
-		k_sem_give(&data->done);
-	}
+	data->hal_result = status;
+	k_sem_give(&data->done);
 }
+
+/* ─────────────────────────── config validation ─────────────────────────── */
 
 static int spi_ytm32_validate_config(const struct spi_config *config)
 {
-	spi_operation_t operation = config->operation;
-	uint16_t word_size = SPI_WORD_SIZE_GET(operation);
+	spi_operation_t op = config->operation;
 
-	if (SPI_OP_MODE_GET(operation) != SPI_OP_MODE_MASTER) {
+	if (SPI_OP_MODE_GET(op) != SPI_OP_MODE_MASTER) {
 		return -ENOTSUP;
 	}
-
-	if (word_size != 8U) {
+	if (SPI_WORD_SIZE_GET(op) != 8U) {
 		return -ENOTSUP;
 	}
-
-	if ((operation & SPI_TRANSFER_LSB) != 0U) {
+	if (op & SPI_TRANSFER_LSB) {
 		return -ENOTSUP;
 	}
-
-	if ((operation & SPI_HALF_DUPLEX) != 0U) {
+	if (op & SPI_HALF_DUPLEX) {
 		return -ENOTSUP;
 	}
-
 #if defined(CONFIG_SPI_EXTENDED_MODES)
-	if ((operation & SPI_LINES_MASK) != SPI_LINES_SINGLE) {
+	if ((op & SPI_LINES_MASK) != SPI_LINES_SINGLE) {
 		return -ENOTSUP;
 	}
 #endif
-
 	if (config->frequency == 0U) {
 		return -EINVAL;
 	}
-
 	return 0;
 }
 
-static void spi_ytm32_fill_hal_config(const struct spi_config *config,
-					     spi_master_config_t *hal_config,
-					     struct spi_ytm32_data *data)
-{
-	SPI_DRV_MasterGetDefaultConfig(hal_config);
-
-	hal_config->bitsPerSec = config->frequency;
-	hal_config->whichPcs = (spi_which_pcs_t)MIN(config->slave, 3U);
-	hal_config->pcsPolarity = (config->operation & SPI_CS_ACTIVE_HIGH) ?
-		SPI_ACTIVE_HIGH : SPI_ACTIVE_LOW;
-	hal_config->isPcsContinuous = false;
-	hal_config->bitcount = 8U;
-	hal_config->clkPhase = (config->operation & SPI_MODE_CPHA) ?
-		SPI_CLOCK_PHASE_2ND_EDGE : SPI_CLOCK_PHASE_1ST_EDGE;
-	hal_config->clkPolarity = (config->operation & SPI_MODE_CPOL) ?
-		SPI_SCK_ACTIVE_LOW : SPI_SCK_ACTIVE_HIGH;
-	hal_config->lsbFirst = false;
-	hal_config->transferType = SPI_USING_INTERRUPTS;
-	hal_config->callback = spi_ytm32_hal_callback;
-	hal_config->callbackParam = data;
-	hal_config->width = SPI_SINGLE_BIT_XFER;
-}
+/* ─────────────────────────── bus configure ─────────────────────────── */
 
 static int spi_ytm32_configure_bus(const struct device *dev,
-					  const struct spi_config *config)
+				   const struct spi_config *config)
 {
 	const struct spi_ytm32_config *cfg = dev->config;
-	struct spi_ytm32_data *data = dev->data;
-	spi_master_config_t hal_config;
-	uint32_t calculated_baudrate;
-	status_t status;
+	spi_operation_t op = config->operation;
 	int ret;
 
 	ret = spi_ytm32_validate_config(config);
@@ -209,210 +132,253 @@ static int spi_ytm32_configure_bus(const struct device *dev,
 		return ret;
 	}
 
-	spi_ytm32_fill_hal_config(config, &hal_config, data);
-
-	status = SPI_DRV_MasterConfigureBus(cfg->instance, &hal_config, &calculated_baudrate);
-	if (status != STATUS_SUCCESS) {
-		return spi_ytm32_status_to_errno(status);
-	}
-
-	return 0;
+	return ytm32_spi_hal_configure(
+		cfg->instance,
+		config->frequency,
+		(op & SPI_MODE_CPOL) ? 1U : 0U,
+		(op & SPI_MODE_CPHA) ? 1U : 0U,
+		(uint8_t)MIN(config->slave, 3U),
+		(op & SPI_CS_ACTIVE_HIGH) ? true : false,
+		spi_cs_is_gpio(config));
 }
 
+/* Configure the GPIO CS pin direction on first use of a given spi_config. */
 static int spi_ytm32_cs_configure(const struct spi_config *config)
 {
 	if (!spi_cs_is_gpio(config)) {
 		return 0;
 	}
-
 	if (!gpio_is_ready_dt(&config->cs.gpio)) {
 		return -ENODEV;
 	}
-
 	return gpio_pin_configure_dt(&config->cs.gpio, GPIO_OUTPUT_INACTIVE);
 }
 
-static void spi_ytm32_cs_control(const struct spi_config *config, bool active)
-{
-	if (!spi_cs_is_gpio(config)) {
-		return;
-	}
+/* ─────────────────────────── transfer ─────────────────────────── */
 
-	if (config->cs.delay != 0U) {
-		k_busy_wait(config->cs.delay);
-	}
-
-	(void)gpio_pin_set_dt(&config->cs.gpio, active ? 1 : 0);
-
-	if (config->cs.delay != 0U) {
-		k_busy_wait(config->cs.delay);
-	}
-}
-
-/* 
- * 此函数负责将 Zephyr 的分段缓冲区 (spi_buf_set) 拆分为固定大小的块，
- * 然后调用底层 YTM32 Vendor HAL 接口来真正发送和接收数据。
- */
-static int spi_ytm32_transfer(const struct device *dev,
-				     const struct spi_buf_set *tx_bufs,
-				     const struct spi_buf_set *rx_bufs)
+/* Issue one non-blocking HAL transfer and block until completion. */
+static int spi_ytm32_one_shot(const struct device *dev,
+			      const uint8_t *tx, uint8_t *rx, uint16_t len)
 {
 	const struct spi_ytm32_config *cfg = dev->config;
 	struct spi_ytm32_data *data = dev->data;
-	struct spi_ytm32_buf_cursor tx = { .set = tx_bufs };
-	struct spi_ytm32_buf_cursor rx = { .set = rx_bufs };
-	size_t tx_len = spi_ytm32_buf_set_len(tx_bufs);
-	size_t rx_len = spi_ytm32_buf_set_len(rx_bufs);
-	size_t remaining = MAX(tx_len, rx_len);
-	uint8_t tx_chunk[YTM32_SPI_TRANSFER_CHUNK];
-	uint8_t rx_chunk[YTM32_SPI_TRANSFER_CHUNK];
-	status_t status;
 	int ret;
 
-	while (remaining > 0U) {
-		size_t chunk_len = MIN(remaining, YTM32_SPI_TRANSFER_CHUNK);
+	k_sem_reset(&data->done);
 
-		/* 将数据从 Zephyr 的 buffer 提取到连续的 chunk 数组中 */
-		for (size_t i = 0; i < chunk_len; i++) {
-			tx_chunk[i] = spi_ytm32_buf_cursor_get(&tx);
+	ret = ytm32_spi_hal_transfer(cfg->instance, tx, rx, len);
+	if (ret < 0) {
+		return ret;
+	}
+
+	ret = k_sem_take(&data->done, K_MSEC(CONFIG_SPI_YTM32_TRANSFER_TIMEOUT_MS));
+	if (ret < 0) {
+		ytm32_spi_hal_abort(cfg->instance);
+		return -ETIMEDOUT;
+	}
+
+	return data->hal_result;   /* 0 or -EIO from spi_ytm32_hal_cb */
+}
+
+/*
+ * Walk both buf_sets in lock-step, issuing one HAL call per natural segment
+ * boundary. Non-NULL buffers are passed directly — no copy.
+ * NULL buffers (dummy TX / discard RX) use module-level dummy arrays,
+ * sub-segmented at YTM32_SPI_DUMMY_LEN when longer.
+ */
+static int spi_ytm32_transfer(const struct device *dev,
+			      const struct spi_buf_set *tx_bufs,
+			      const struct spi_buf_set *rx_bufs)
+{
+	const size_t tx_count = tx_bufs ? tx_bufs->count : 0;
+	const size_t rx_count = rx_bufs ? rx_bufs->count : 0;
+	size_t ti = 0, ri = 0;
+	size_t tx_off = 0, rx_off = 0;
+
+	while (ti < tx_count || ri < rx_count) {
+		size_t tx_left = (ti < tx_count) ?
+				 tx_bufs->buffers[ti].len - tx_off : 0;
+		size_t rx_left = (ri < rx_count) ?
+				 rx_bufs->buffers[ri].len - rx_off : 0;
+
+		const uint8_t *tx_ptr;
+		size_t tx_seg;
+
+		if (ti < tx_count) {
+			const void *buf = tx_bufs->buffers[ti].buf;
+
+			tx_ptr = buf ? (const uint8_t *)buf + tx_off : dummy_tx;
+			tx_seg = buf ? tx_left : MIN(tx_left, YTM32_SPI_DUMMY_LEN);
+		} else {
+			tx_ptr = dummy_tx;
+			tx_seg = YTM32_SPI_DUMMY_LEN;
 		}
 
-		k_sem_reset(&data->done);
-		data->transfer_status = STATUS_BUSY;
+		uint8_t *rx_ptr;
+		size_t rx_seg;
 
-		status = SPI_DRV_MasterTransfer(cfg->instance, tx_chunk, rx_chunk, chunk_len);
-		if (status != STATUS_SUCCESS) {
-			return spi_ytm32_status_to_errno(status);
+		if (ri < rx_count) {
+			void *buf = rx_bufs->buffers[ri].buf;
+
+			rx_ptr = buf ? (uint8_t *)buf + rx_off : dummy_rx;
+			rx_seg = buf ? rx_left : MIN(rx_left, YTM32_SPI_DUMMY_LEN);
+		} else {
+			rx_ptr = dummy_rx;
+			rx_seg = YTM32_SPI_DUMMY_LEN;
 		}
 
-		ret = k_sem_take(&data->done, K_MSEC(CONFIG_SPI_YTM32_TRANSFER_TIMEOUT_MS));
+		size_t seg_len = MIN(MIN(tx_seg, rx_seg), (size_t)UINT16_MAX);
+
+		if (seg_len == 0) {
+			break;
+		}
+
+		int ret = spi_ytm32_one_shot(dev, tx_ptr, rx_ptr,
+					     (uint16_t)seg_len);
 		if (ret < 0) {
-			(void)SPI_DRV_MasterAbortTransfer(cfg->instance);
-			return -ETIMEDOUT;
+			return ret;
 		}
 
-		status = SPI_DRV_MasterGetTransferStatus(cfg->instance, NULL);
-		if (status != STATUS_SUCCESS) {
-			return spi_ytm32_status_to_errno(status);
+		if (ti < tx_count) {
+			tx_off += seg_len;
+			if (tx_off >= tx_bufs->buffers[ti].len) {
+				ti++;
+				tx_off = 0;
+			}
 		}
-
-		for (size_t i = 0; i < chunk_len; i++) {
-			spi_ytm32_buf_cursor_put(&rx, rx_chunk[i]);
+		if (ri < rx_count) {
+			rx_off += seg_len;
+			if (rx_off >= rx_bufs->buffers[ri].len) {
+				ri++;
+				rx_off = 0;
+			}
 		}
-
-		remaining -= chunk_len;
 	}
 
 	return 0;
 }
 
-/* 
- * 硬件驱动适配层 (Zephyr Driver Wrapper Layer) 的核心入口点。
- * Zephyr SPI 子系统最终会路由并调用到这个 transceive 函数。
- */
+/* ─────────────────────────── Zephyr SPI API ─────────────────────────── */
+
 static int spi_ytm32_transceive(const struct device *dev,
-				       const struct spi_config *config,
-				       const struct spi_buf_set *tx_bufs,
-				       const struct spi_buf_set *rx_bufs)
+				const struct spi_config *config,
+				const struct spi_buf_set *tx_bufs,
+				const struct spi_buf_set *rx_bufs)
 {
 	struct spi_ytm32_data *data = dev->data;
 	int ret;
 
-	/* 1. 获取互斥锁，确保多线程下 SPI 总线不会产生并发冲突 */
-	k_mutex_lock(&data->lock, K_FOREVER);
+	spi_context_lock(&data->ctx, false, NULL, NULL, config);
 
-	/* 2. 将 Zephyr 的 SPI 参数 (spi_config) 转换为底层 YTM32 硬件所需的配置并应用 */
-	ret = spi_ytm32_configure_bus(dev, config);
-	if (ret < 0) {
-		goto out;
+	if (!spi_context_configured(&data->ctx, config)) {
+		ret = spi_ytm32_configure_bus(dev, config);
+		if (ret < 0) {
+			goto out;
+		}
+		ret = spi_ytm32_cs_configure(config);
+		if (ret < 0) {
+			goto out;
+		}
+		data->ctx.config = config;
 	}
 
-	/* 3. 配置片选引脚 (CS) */
-	ret = spi_ytm32_cs_configure(config);
-	if (ret < 0) {
-		goto out;
-	}
-
-	/* 4. 真正的数据传输流程: 拉低片选 -> 传输数据 -> 拉高片选释放设备 */
-	spi_ytm32_cs_control(config, true);
+	spi_context_cs_control(&data->ctx, true);
 	ret = spi_ytm32_transfer(dev, tx_bufs, rx_bufs);
-	spi_ytm32_cs_control(config, false);
+	spi_context_cs_control(&data->ctx, false);
 
 out:
-	k_mutex_unlock(&data->lock);
+	if (ret < 0) {
+		data->ctx.config = NULL;
+	}
+	spi_context_release(&data->ctx, ret);
 	return ret;
 }
 
-static int spi_ytm32_release(const struct device *dev, const struct spi_config *config)
+static int spi_ytm32_release(const struct device *dev,
+			     const struct spi_config *config)
 {
-	ARG_UNUSED(dev);
-	ARG_UNUSED(config);
+	struct spi_ytm32_data *data = dev->data;
 
+	ARG_UNUSED(config);
+	spi_context_unlock_unconditionally(&data->ctx);
 	return 0;
 }
+
+/* ─────────────────────────── init ─────────────────────────── */
 
 static int spi_ytm32_init(const struct device *dev)
 {
 	const struct spi_ytm32_config *cfg = dev->config;
 	struct spi_ytm32_data *data = dev->data;
-	spi_master_config_t hal_config;
 	uint32_t clock_rate;
-	status_t status;
+	bool use_dma = false;
+	uint8_t dma_rx = 0, dma_tx = 0;
 	int ret;
 
-	k_mutex_init(&data->lock);
 	k_sem_init(&data->done, 0, 1);
-	data->transfer_status = STATUS_SUCCESS;
 
 	if (!device_is_ready(cfg->clock_dev)) {
-		printk("%s clock device not ready\n", dev->name);
+		LOG_ERR("clock device not ready");
 		return -ENODEV;
 	}
 
 	ret = clock_control_on(cfg->clock_dev, cfg->clock_subsys);
 	if (ret < 0) {
-		printk("%s clock_control_on failed: %d\n", dev->name, ret);
+		LOG_ERR("clock_control_on failed: %d", ret);
 		return ret;
 	}
 
 	ret = clock_control_get_rate(cfg->clock_dev, cfg->clock_subsys, &clock_rate);
 	if (ret < 0) {
-		printk("%s clock_control_get_rate failed: %d\n", dev->name, ret);
+		LOG_ERR("clock_control_get_rate failed: %d", ret);
 		return ret;
 	}
 
 	ret = pinctrl_apply_state(cfg->pincfg, PINCTRL_STATE_DEFAULT);
 	if (ret < 0) {
-		printk("%s pinctrl_apply_state failed: %d\n", dev->name, ret);
+		LOG_ERR("pinctrl_apply_state failed: %d", ret);
 		return ret;
 	}
 
-	SPI_DRV_MasterGetDefaultConfig(&hal_config);
-	hal_config.bitsPerSec = MIN(clock_rate / 2U, 1000000U);
-	hal_config.bitcount = 8U;
-	hal_config.transferType = SPI_USING_INTERRUPTS;
-	hal_config.callback = spi_ytm32_hal_callback;
-	hal_config.callbackParam = data;
-	hal_config.width = SPI_SINGLE_BIT_XFER;
+#ifdef CONFIG_SPI_YTM32_DMA
+	if (cfg->dma_dev != NULL && device_is_ready(cfg->dma_dev)) {
+		use_dma         = true;
+		dma_tx          = cfg->dma_tx_chan;
+		dma_rx          = cfg->dma_rx_chan;
+		data->dma_active = true;
+		data->dma_tx_chan = dma_tx;
+		data->dma_rx_chan = dma_rx;
+		LOG_INF("DMA mode: tx ch%u, rx ch%u", dma_tx, dma_rx);
+	} else {
+		LOG_INF("interrupt mode (DMA not configured or not ready)");
+	}
+#endif
 
-	status = SPI_DRV_MasterInit(cfg->instance, &data->hal_state, &hal_config);
-	if (status != STATUS_SUCCESS) {
-		printk("%s SPI_DRV_MasterInit failed: %d instance=%u clock=%u\n",
-		       dev->name, status, cfg->instance, clock_rate);
-		return spi_ytm32_status_to_errno(status);
+	ret = ytm32_spi_hal_init(cfg->instance, clock_rate,
+				 use_dma, dma_rx, dma_tx,
+				 spi_ytm32_hal_cb, data);
+	if (ret < 0) {
+		LOG_ERR("ytm32_spi_hal_init failed: %d (instance=%u, clock=%u Hz)",
+			ret, cfg->instance, clock_rate);
+		return ret;
 	}
 
 	cfg->irq_config_func();
 
-	LOG_INF("%s functional clock: %u Hz", dev->name, clock_rate);
+	spi_context_unlock_unconditionally(&data->ctx);
 
+	LOG_INF("functional clock: %u Hz", clock_rate);
 	return 0;
 }
 
-/* 将我们实现的适配函数注册到 Zephyr SPI 子系统的 API 接口中 */
+/* ─────────────────────────── driver API + instance macro ─────────────────────────── */
+
 static DEVICE_API(spi, spi_ytm32_api) = {
 	.transceive = spi_ytm32_transceive,
-	.release = spi_ytm32_release,
+	.release    = spi_ytm32_release,
+#ifdef CONFIG_SPI_RTIO
+	.iodev_submit = spi_rtio_iodev_default_submit,
+#endif
 };
 
 #define SPI_YTM32_IRQ_HANDLER(n) \
@@ -420,7 +386,7 @@ static DEVICE_API(spi, spi_ytm32_api) = {
 	{ \
 		const struct device *dev = arg; \
 		const struct spi_ytm32_config *cfg = dev->config; \
-		SPI_DRV_MasterIRQHandler(cfg->instance); \
+		ytm32_spi_hal_irq(cfg->instance); \
 	} \
 	static void spi_ytm32_irq_config_##n(void) \
 	{ \
@@ -429,18 +395,35 @@ static DEVICE_API(spi, spi_ytm32_api) = {
 		irq_enable(DT_INST_IRQN(n)); \
 	}
 
+#ifdef CONFIG_SPI_YTM32_DMA
+#define SPI_YTM32_DMA_FIELDS(n) \
+	.dma_dev    = COND_CODE_1(DT_INST_NODE_HAS_PROP(n, dmas), \
+		(DEVICE_DT_GET_OR_NULL(DT_INST_DMAS_CTLR_BY_NAME(n, tx))), \
+		(NULL)), \
+	.dma_tx_chan = COND_CODE_1(DT_INST_NODE_HAS_PROP(n, dmas), \
+		(DT_INST_DMAS_CELL_BY_NAME(n, tx, channel)), (0U)), \
+	.dma_rx_chan = COND_CODE_1(DT_INST_NODE_HAS_PROP(n, dmas), \
+		(DT_INST_DMAS_CELL_BY_NAME(n, rx, channel)), (0U)),
+#else
+#define SPI_YTM32_DMA_FIELDS(n)
+#endif
+
 #define SPI_YTM32_INIT(n) \
 	YTM32_SPI_INSTANCE_VALID(DT_INST_REG_ADDR(n)); \
 	PINCTRL_DT_INST_DEFINE(n); \
 	SPI_YTM32_IRQ_HANDLER(n) \
-	static struct spi_ytm32_data spi_ytm32_data_##n; \
+	static struct spi_ytm32_data spi_ytm32_data_##n = { \
+		SPI_CONTEXT_INIT_LOCK(spi_ytm32_data_##n, ctx), \
+		SPI_CONTEXT_INIT_SYNC(spi_ytm32_data_##n, ctx), \
+	}; \
 	static const struct spi_ytm32_config spi_ytm32_config_##n = { \
-		.base = DT_INST_REG_ADDR(n), \
-		.instance = YTM32_SPI_INSTANCE_FROM_ADDR(DT_INST_REG_ADDR(n)), \
-		.clock_dev = DEVICE_DT_GET(DT_INST_CLOCKS_CTLR(n)), \
-		.clock_subsys = (clock_control_subsys_t)DT_INST_CLOCKS_CELL(n, id), \
-		.pincfg = PINCTRL_DT_INST_DEV_CONFIG_GET(n), \
+		.base            = DT_INST_REG_ADDR(n), \
+		.instance        = YTM32_SPI_INSTANCE_FROM_ADDR(DT_INST_REG_ADDR(n)), \
+		.clock_dev       = DEVICE_DT_GET(DT_INST_CLOCKS_CTLR(n)), \
+		.clock_subsys    = (clock_control_subsys_t)DT_INST_CLOCKS_CELL(n, id), \
+		.pincfg          = PINCTRL_DT_INST_DEV_CONFIG_GET(n), \
 		.irq_config_func = spi_ytm32_irq_config_##n, \
+		SPI_YTM32_DMA_FIELDS(n) \
 	}; \
 	DEVICE_DT_INST_DEFINE(n, spi_ytm32_init, NULL, &spi_ytm32_data_##n, \
 			      &spi_ytm32_config_##n, POST_KERNEL, \

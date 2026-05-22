@@ -1,0 +1,84 @@
+description: YTMicro YTM32 eTMR PWM controller
+
+compatible: "ytmicro,ytm32-etmr-pwm"
+
+include:
+  - name: pwm-controller.yaml
+  - name: pinctrl-device.yaml
+  - name: base.yaml
+
+properties:
+  reg:
+    required: true
+
+  interrupts:
+    required: true
+    description: |
+      Six interrupts in order: Ch0/Ch1, Ch2/Ch3, Ch4/Ch5, Ch6/Ch7, Fault, Overflow.
+
+  interrupt-names:
+    type: string-array
+    required: true
+
+  clocks:
+    type: phandle-array
+    required: true
+    description: eTMR peripheral clock specifier from the CGU.
+
+  ytmicro,instance:
+    type: int
+    required: true
+    description: Hardware eTMR instance index (0-3).
+
+  ytmicro,functional-clock-source:
+    type: int
+    required: true
+    description: Functional clock source passed to the YTM32 clock controller (YTM32_CLOCK_SRC_*).
+
+  ytmicro,functional-clock-divider:
+    type: int
+    required: false
+    default: 1
+    description: Functional clock divider passed to the YTM32 clock controller.
+
+  ytmicro,prescaler:
+    type: int
+    required: false
+    default: 0
+    description: |
+      eTMR internal clock prescaler. Counter clock = functional_clock >> prescaler.
+      Valid range 0-7 (divide by 1, 2, 4, 8, 16, 32, 64, 128).
+
+  ytmicro,complementary-channels-mask:
+    type: int
+    required: false
+    default: 0
+    description: |
+      Bitmask of even channel IDs that drive complementary pairs.
+      Bit N set means channel N (must be even) and channel N+1 form a
+      complementary pair with center-aligned PWM and dead-time insertion.
+      Example: 0x15 (0b00010101) enables pairs CH0/CH1, CH2/CH3, CH4/CH5.
+
+  ytmicro,deadtime-ns:
+    type: int
+    required: false
+    default: 0
+    description: |
+      Dead-time insertion in nanoseconds, applied identically to all
+      complementary pairs defined by ytmicro,complementary-channels-mask.
+
+  ytmicro,pwm-frequency-hz:
+    type: int
+    required: false
+    default: 20000
+    description: |
+      Initial PWM switching frequency in Hz used during driver init.
+      The first pwm_set_cycles() call will override this.
+
+  "#pwm-cells":
+    const: 3
+
+pwm-cells:
+  - channel
+  - period
+  - flags

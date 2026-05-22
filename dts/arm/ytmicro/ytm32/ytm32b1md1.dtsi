@@ -96,6 +96,127 @@
 			status = "disabled";
 		};
 
+		can0: can@40030000 {
+			compatible = "ytmicro,ytm32-flexcan";
+			reg = <0x40030000 0x4000>;
+			interrupts = <78 0>, <79 0>, <80 0>,
+				     <81 0>, <82 0>, <83 0>, <84 0>;
+			interrupt-names = "ored", "error", "wakeup",
+					  "mb_0_15", "mb_16_31",
+					  "mb_32_47", "mb_48_63";
+			clocks = <&cgu YTM32_CLOCK_FLEXCAN0>;
+			ytmicro,functional-clock-source = <YTM32_CLOCK_SRC_FXOSC>;
+			ytmicro,functional-clock-divider = <1>;
+			max-mb = <64>;
+			rx-mb-count = <8>;
+			tx-mb-count = <4>;
+			supports-fd;
+			supports-enhanced-rx-fifo;
+			status = "disabled";
+		};
+
+		can1: can@40034000 {
+			compatible = "ytmicro,ytm32-flexcan";
+			reg = <0x40034000 0x4000>;
+			interrupts = <85 0>, <86 0>, <87 0>,
+				     <88 0>, <89 0>;
+			interrupt-names = "ored", "error", "wakeup",
+					  "mb_0_15", "mb_16_31";
+			clocks = <&cgu YTM32_CLOCK_FLEXCAN1>;
+			ytmicro,functional-clock-source = <YTM32_CLOCK_SRC_FXOSC>;
+			ytmicro,functional-clock-divider = <1>;
+			max-mb = <32>;
+			rx-mb-count = <8>;
+			tx-mb-count = <4>;
+			supports-fd;
+			status = "disabled";
+		};
+
+		can2: can@40038000 {
+			compatible = "ytmicro,ytm32-flexcan";
+			reg = <0x40038000 0x4000>;
+			interrupts = <92 0>, <93 0>, <94 0>,
+				     <95 0>, <96 0>;
+			interrupt-names = "ored", "error", "wakeup",
+					  "mb_0_15", "mb_16_31";
+			clocks = <&cgu YTM32_CLOCK_FLEXCAN2>;
+			ytmicro,functional-clock-source = <YTM32_CLOCK_SRC_FXOSC>;
+			ytmicro,functional-clock-divider = <1>;
+			max-mb = <32>;
+			rx-mb-count = <8>;
+			tx-mb-count = <4>;
+			supports-fd;
+			status = "disabled";
+		};
+
+		adc0: adc@40040000 {
+			compatible = "ytmicro,ytm32-adc";
+			reg = <0x40040000 0x58>;
+			interrupts = <39 0>;
+			clocks = <&cgu YTM32_CLOCK_ADC0>;
+			ytmicro,functional-clock-source = <YTM32_CLOCK_SRC_FXOSC>;
+			ytmicro,functional-clock-divider = <3>;
+			/* ch8, DMA_REQ_ADC0 = 42 — ch0~ch7 are reserved for SPI0~SPI3 */
+			dmas = <&dma0 8 42>;
+			dma-names = "rx";
+			/* TMU_TRIG_SOURCE_eTMR0_INIT_TRIG = 22 (counter bottom, best for motor drive) */
+			ytmicro,hw-trigger-source = <22>;
+			#io-channel-cells = <1>;
+			status = "disabled";
+		};
+
+		etmr0: etmr@40049000 {
+			compatible = "ytmicro,ytm32-etmr-pwm";
+			reg = <0x40049000 0x1000>;
+			interrupts = <99 0>, <100 0>, <101 0>, <102 0>, <103 0>, <104 0>;
+			interrupt-names = "ch01", "ch23", "ch45", "ch67", "fault", "ovf";
+			clocks = <&cgu YTM32_CLOCK_ETMR0>;
+			ytmicro,instance = <0>;
+			ytmicro,functional-clock-source = <YTM32_CLOCK_SRC_FIRC>;
+			ytmicro,functional-clock-divider = <1>;
+			status = "disabled";
+			#pwm-cells = <3>;
+		};
+
+		etmr1: etmr@4004a000 {
+			compatible = "ytmicro,ytm32-etmr-pwm";
+			reg = <0x4004a000 0x1000>;
+			interrupts = <105 0>, <106 0>, <107 0>, <108 0>, <109 0>, <110 0>;
+			interrupt-names = "ch01", "ch23", "ch45", "ch67", "fault", "ovf";
+			clocks = <&cgu YTM32_CLOCK_ETMR1>;
+			ytmicro,instance = <1>;
+			ytmicro,functional-clock-source = <YTM32_CLOCK_SRC_FIRC>;
+			ytmicro,functional-clock-divider = <1>;
+			status = "disabled";
+			#pwm-cells = <3>;
+		};
+
+		etmr2: etmr@4004b000 {
+			compatible = "ytmicro,ytm32-etmr-pwm";
+			reg = <0x4004b000 0x1000>;
+			interrupts = <111 0>, <112 0>, <113 0>, <114 0>, <115 0>, <116 0>;
+			interrupt-names = "ch01", "ch23", "ch45", "ch67", "fault", "ovf";
+			clocks = <&cgu YTM32_CLOCK_ETMR2>;
+			ytmicro,instance = <2>;
+			ytmicro,functional-clock-source = <YTM32_CLOCK_SRC_FIRC>;
+			ytmicro,functional-clock-divider = <1>;
+			status = "disabled";
+			#pwm-cells = <3>;
+		};
+
+		etmr3: etmr@4004c000 {
+			compatible = "ytmicro,ytm32-etmr-pwm";
+			reg = <0x4004c000 0x1000>;
+			interrupts = <117 0>, <118 0>, <119 0>, <120 0>, <121 0>, <122 0>;
+			interrupt-names = "ch01", "ch23", "ch45", "ch67", "fault", "ovf";
+			clocks = <&cgu YTM32_CLOCK_ETMR3>;
+			ytmicro,instance = <3>;
+			ytmicro,functional-clock-source = <YTM32_CLOCK_SRC_FIRC>;
+			ytmicro,functional-clock-divider = <1>;
+			status = "disabled";
+			#pwm-cells = <3>;
+		};
+
 		lptmr0: lptmr@4005d000 {
 			compatible = "ytmicro,ytm32-lptmr";
 			reg = <0x4005d000 0x1000>;
@@ -106,6 +227,33 @@
 			status = "disabled";
 		};
 
+		dma0: dma@40008000 {
+			compatible = "ytmicro,ytm32-dma";
+			reg = <0x40008000 0x1000>;
+			/*
+			 * 16 per-channel IRQs (DMA0_IRQn=0 .. DMA15_IRQn=15)
+			 * followed by the shared error IRQ (DMA_Error_IRQn=16).
+			 */
+			interrupts = < 0 2>, < 1 2>, < 2 2>, < 3 2>,
+			             < 4 2>, < 5 2>, < 6 2>, < 7 2>,
+			             < 8 2>, < 9 2>, <10 2>, <11 2>,
+			             <12 2>, <13 2>, <14 2>, <15 2>,
+			             <16 2>;
+			clocks = <&cgu YTM32_CLOCK_DMA>;
+			dma-channels = <16>;
+			#dma-cells = <2>;
+			status = "disabled";
+		};
+
+		/*
+		 * Default DMA channel assignments (board overlay may override):
+		 *   SPI0: ch0/TX(trigsrc=15)  ch1/RX(trigsrc=14)
+		 *   SPI1: ch2/TX(trigsrc=17)  ch3/RX(trigsrc=16)
+		 *   SPI2: ch4/TX(trigsrc=19)  ch5/RX(trigsrc=18)
+		 *   SPI3: ch6/TX(trigsrc=61)  ch7/RX(trigsrc=60)
+		 * DMA is gated by dma0's status; keep dma0 disabled here and
+		 * enable it in the board DTS to activate DMA mode.
+		 */
 		spi0: spi@4002a000 {
 				compatible = "ytmicro,ytm32-spi";
 				reg = <0x4002a000 0x1000>;
@@ -115,6 +263,8 @@
 				ytmicro,functional-clock-divider = <1>;
 				#address-cells = <1>;
 				#size-cells = <0>;
+				dmas = <&dma0 0 15>, <&dma0 1 14>;
+				dma-names = "tx", "rx";
 				status = "disabled";
 			};
 
@@ -127,6 +277,8 @@
 				ytmicro,functional-clock-divider = <1>;
 				#address-cells = <1>;
 				#size-cells = <0>;
+				dmas = <&dma0 2 17>, <&dma0 3 16>;
+				dma-names = "tx", "rx";
 				status = "disabled";
 			};
 
@@ -139,6 +291,8 @@
 				ytmicro,functional-clock-divider = <1>;
 				#address-cells = <1>;
 				#size-cells = <0>;
+				dmas = <&dma0 4 19>, <&dma0 5 18>;
+				dma-names = "tx", "rx";
 				status = "disabled";
 			};
 
@@ -151,6 +305,8 @@
 				ytmicro,functional-clock-divider = <1>;
 				#address-cells = <1>;
 				#size-cells = <0>;
+				dmas = <&dma0 6 61>, <&dma0 7 60>;
+				dma-names = "tx", "rx";
 				status = "disabled";
 			};
 

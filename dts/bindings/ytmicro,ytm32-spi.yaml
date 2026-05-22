@@ -34,3 +34,21 @@ properties:
   pinctrl-names:
     type: string-array
     required: false
+
+  dmas:
+    type: phandle-array
+    required: false
+    description: |
+      DMA channels for SPI TX and RX transfers. Each entry is a two-cell
+      phandle-array: <&dma channel trigsrc>.
+        channel : virtual DMA channel number (0-15 on YTM32B1MD1)
+        trigsrc : DMAMUX request source (dma_request_source_t)
+      Example (spi3, channels 6/7, SPI3_TX=61 / SPI3_RX=60):
+        dmas = <&dma0 6 61>, <&dma0 7 60>;
+        dma-names = "tx", "rx";
+      Omit or keep dma0 disabled to fall back to interrupt-driven mode.
+
+  dma-names:
+    type: string-array
+    required: false
+    description: Must be "tx" and "rx" when 'dmas' is specified.

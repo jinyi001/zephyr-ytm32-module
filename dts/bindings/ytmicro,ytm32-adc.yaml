@@ -1,0 +1,56 @@
+description: YTMicro YTM32 ADC controller
+
+compatible: "ytmicro,ytm32-adc"
+
+include: [adc-controller.yaml, pinctrl-device.yaml]
+
+properties:
+  reg:
+    required: true
+
+  interrupts:
+    required: true
+
+  clocks:
+    type: phandle-array
+    required: true
+    description: ADC peripheral clock specifier from the CGU.
+
+  ytmicro,functional-clock-source:
+    type: int
+    required: true
+    description: Functional clock source passed to the YTM32 clock controller.
+
+  ytmicro,functional-clock-divider:
+    type: int
+    required: false
+    default: 3
+    description: |
+      ADC clock divider register value. Actual divisor = value + 1.
+      Default 3 means divide-by-4 (16 MHz FXOSC -> 4 MHz ADC clock).
+
+  dmas:
+    type: phandle-array
+    required: false
+    description: |
+      DMA channel for draining the ADC FIFO in hardware-triggered mode.
+      Provide one entry: <&dma0 channel slot>.
+
+  dma-names:
+    type: string-array
+    required: false
+    description: Must be "rx" when dmas is present.
+
+  ytmicro,hw-trigger-source:
+    type: int
+    required: false
+    description: |
+      TMU trigger source index routed to ADC0_EXT_TRIG.
+      Example: 22 = TMU_TRIG_SOURCE_eTMR0_INIT_TRIG.
+      When absent, only software-triggered mode is available.
+
+  "#io-channel-cells":
+    const: 1
+
+io-channel-cells:
+  - input

@@ -1,0 +1,9 @@
+config ADC_YTM32
+	bool "YTM32 ADC driver"
+	default y
+	depends on DT_HAS_YTMICRO_YTM32_ADC_ENABLED
+	select ADC
+	help
+	  Enable the YTMicro YTM32 ADC driver.
+	  Supports interrupt-driven, software-triggered conversions with
+	  up to 8 channels per sequence and 6/8/10/12-bit resolution.
