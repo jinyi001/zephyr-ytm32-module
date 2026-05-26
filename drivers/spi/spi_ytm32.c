@@ -6,6 +6,7 @@
 #define DT_DRV_COMPAT ytmicro_ytm32_spi
 
 #include <errno.h>
+#include <stdint.h>
 
 #define LOG_LEVEL CONFIG_SPI_LOG_LEVEL
 #include <zephyr/logging/log.h>
@@ -32,6 +33,8 @@ LOG_MODULE_REGISTER(spi_ytm32);
  * size because the module-level dummy arrays are bounded to this length.
  */
 #define YTM32_SPI_DUMMY_LEN 64U
+BUILD_ASSERT((YTM32_SPI_DUMMY_LEN & 0x1U) == 0U,
+	     "YTM32_SPI_DUMMY_LEN must be even");
 
 #define YTM32_SPI_INSTANCE_FROM_ADDR(addr) \
 	((((uint32_t)(addr)) - ((uint32_t)SPI0_BASE)) / YTM32_SPI_INSTANCE_STRIDE)
@@ -74,10 +77,10 @@ struct spi_ytm32_data {
  * dummy_rx is write-only discard; shared across SPI instances is safe
  * because its contents are never read back.
  */
-static const uint8_t dummy_tx[YTM32_SPI_DUMMY_LEN] = {
+static const uint8_t dummy_tx[YTM32_SPI_DUMMY_LEN] __aligned(2) = {
 	[0 ... (YTM32_SPI_DUMMY_LEN - 1)] = 0xFF
 };
-static uint8_t dummy_rx[YTM32_SPI_DUMMY_LEN];
+static uint8_t dummy_rx[YTM32_SPI_DUMMY_LEN] __aligned(2);
 
 /* ─────────────────────────── HAL callback ─────────────────────────── */
 
@@ -98,7 +101,7 @@ static int spi_ytm32_validate_config(const struct spi_config *config)
 	if (SPI_OP_MODE_GET(op) != SPI_OP_MODE_MASTER) {
 		return -ENOTSUP;
 	}
-	if (SPI_WORD_SIZE_GET(op) != 8U) {
+	if ((SPI_WORD_SIZE_GET(op) != 8U) && (SPI_WORD_SIZE_GET(op) != 16U)) {
 		return -ENOTSUP;
 	}
 	if (op & SPI_TRANSFER_LSB) {
@@ -118,6 +121,40 @@ static int spi_ytm32_validate_config(const struct spi_config *config)
 	return 0;
 }
 
+static int spi_ytm32_validate_buf_set(const struct spi_buf_set *bufs,
+				      uint8_t word_size)
+{
+	if ((bufs == NULL) || (word_size != 16U)) {
+		return 0;
+	}
+
+	for (size_t i = 0; i < bufs->count; i++) {
+		const struct spi_buf *buf = &bufs->buffers[i];
+
+		if ((buf->len & 0x1U) != 0U) {
+			return -EINVAL;
+		}
+		if ((buf->buf != NULL) && ((((uintptr_t)buf->buf) & 0x1U) != 0U)) {
+			return -EINVAL;
+		}
+	}
+
+	return 0;
+}
+
+static int spi_ytm32_validate_buf_sets(const struct spi_buf_set *tx_bufs,
+				       const struct spi_buf_set *rx_bufs,
+				       uint8_t word_size)
+{
+	int ret = spi_ytm32_validate_buf_set(tx_bufs, word_size);
+
+	if (ret < 0) {
+		return ret;
+	}
+
+	return spi_ytm32_validate_buf_set(rx_bufs, word_size);
+}
+
 /* ─────────────────────────── bus configure ─────────────────────────── */
 
 static int spi_ytm32_configure_bus(const struct device *dev,
@@ -129,6 +166,14 @@ static int spi_ytm32_configure_bus(const struct device *dev,
 
 	ret = spi_ytm32_validate_config(config);
 	if (ret < 0) {
+		LOG_ERR("unsupported SPI config: op=0x%x word=%u cpol=%u cpha=%u lsb=%u half=%u freq=%u",
+			(uint32_t)op,
+			SPI_WORD_SIZE_GET(op),
+			(op & SPI_MODE_CPOL) ? 1U : 0U,
+			(op & SPI_MODE_CPHA) ? 1U : 0U,
+			(op & SPI_TRANSFER_LSB) ? 1U : 0U,
+			(op & SPI_HALF_DUPLEX) ? 1U : 0U,
+			config->frequency);
 		return ret;
 	}
 
@@ -137,6 +182,7 @@ static int spi_ytm32_configure_bus(const struct device *dev,
 		config->frequency,
 		(op & SPI_MODE_CPOL) ? 1U : 0U,
 		(op & SPI_MODE_CPHA) ? 1U : 0U,
+		SPI_WORD_SIZE_GET(op),
 		(uint8_t)MIN(config->slave, 3U),
 		(op & SPI_CS_ACTIVE_HIGH) ? true : false,
 		spi_cs_is_gpio(config));
@@ -188,12 +234,15 @@ static int spi_ytm32_one_shot(const struct device *dev,
  */
 static int spi_ytm32_transfer(const struct device *dev,
 			      const struct spi_buf_set *tx_bufs,
-			      const struct spi_buf_set *rx_bufs)
+			      const struct spi_buf_set *rx_bufs,
+			      uint8_t word_size)
 {
 	const size_t tx_count = tx_bufs ? tx_bufs->count : 0;
 	const size_t rx_count = rx_bufs ? rx_bufs->count : 0;
 	size_t ti = 0, ri = 0;
 	size_t tx_off = 0, rx_off = 0;
+	size_t max_chunk = (word_size == 16U) ? ((size_t)UINT16_MAX & ~0x1U)
+					     : (size_t)UINT16_MAX;
 
 	while (ti < tx_count || ri < rx_count) {
 		size_t tx_left = (ti < tx_count) ?
@@ -227,7 +276,7 @@ static int spi_ytm32_transfer(const struct device *dev,
 			rx_seg = YTM32_SPI_DUMMY_LEN;
 		}
 
-		size_t seg_len = MIN(MIN(tx_seg, rx_seg), (size_t)UINT16_MAX);
+		size_t seg_len = MIN(MIN(tx_seg, rx_seg), max_chunk);
 
 		if (seg_len == 0) {
 			break;
@@ -282,8 +331,15 @@ static int spi_ytm32_transceive(const struct device *dev,
 		data->ctx.config = config;
 	}
 
+	ret = spi_ytm32_validate_buf_sets(tx_bufs, rx_bufs,
+					 SPI_WORD_SIZE_GET(config->operation));
+	if (ret < 0) {
+		goto out;
+	}
+
 	spi_context_cs_control(&data->ctx, true);
-	ret = spi_ytm32_transfer(dev, tx_bufs, rx_bufs);
+	ret = spi_ytm32_transfer(dev, tx_bufs, rx_bufs,
+					 SPI_WORD_SIZE_GET(config->operation));
 	spi_context_cs_control(&data->ctx, false);
 
 out:

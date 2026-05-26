@@ -77,7 +77,7 @@ static void spi_bridge_cb(void *driver_state, spi_event_t event, void *user_data
  */
 static void fill_hal_config(uint8_t instance,
 			    uint32_t freq,
-			    uint8_t cpol, uint8_t cpha,
+			    uint8_t cpol, uint8_t cpha, uint8_t word_size,
 			    uint8_t cs_idx, bool cs_active_hi, bool gpio_cs,
 			    spi_master_config_t *out)
 {
@@ -92,7 +92,7 @@ static void fill_hal_config(uint8_t instance,
 	 * frames and interfere with the software-driven GPIO line.
 	 */
 	out->isPcsContinuous = gpio_cs;
-	out->bitcount        = 8U;
+	out->bitcount        = word_size;
 	out->clkPolarity     = cpol ? SPI_SCK_ACTIVE_LOW : SPI_SCK_ACTIVE_HIGH;
 	out->clkPhase        = cpha ? SPI_CLOCK_PHASE_2ND_EDGE
 				    : SPI_CLOCK_PHASE_1ST_EDGE;
@@ -134,7 +134,7 @@ int ytm32_spi_hal_init(uint8_t instance, uint32_t clock_rate,
 	}
 
 	fill_hal_config(instance, default_freq,
-			0, 0,       /* cpol=0, cpha=0 */
+			0, 0, 8U,   /* cpol=0, cpha=0, word_size=8 */
 			0, false,   /* cs_idx=0, cs_active_low */
 			false,      /* gpio_cs=false */
 			&hal_cfg);
@@ -144,14 +144,14 @@ int ytm32_spi_hal_init(uint8_t instance, uint32_t clock_rate,
 }
 
 int ytm32_spi_hal_configure(uint8_t instance, uint32_t freq,
-			    uint8_t cpol, uint8_t cpha,
+			    uint8_t cpol, uint8_t cpha, uint8_t word_size,
 			    uint8_t cs_idx, bool cs_active_hi, bool gpio_cs)
 {
 	spi_master_config_t hal_cfg;
 	uint32_t calc_baud;
 
-	fill_hal_config(instance, freq, cpol, cpha, cs_idx, cs_active_hi,
-			gpio_cs, &hal_cfg);
+	fill_hal_config(instance, freq, cpol, cpha, word_size, cs_idx,
+			cs_active_hi, gpio_cs, &hal_cfg);
 
 	status_t s = SPI_DRV_MasterConfigureBus(instance, &hal_cfg, &calc_baud);
 	return status_to_errno(s);

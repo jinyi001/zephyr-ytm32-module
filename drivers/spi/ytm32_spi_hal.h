@@ -50,7 +50,7 @@ int ytm32_spi_hal_init(uint8_t instance, uint32_t clock_rate,
  * Returns 0 on success, negative errno on failure.
  */
 int ytm32_spi_hal_configure(uint8_t instance, uint32_t freq,
-			    uint8_t cpol, uint8_t cpha,
+			    uint8_t cpol, uint8_t cpha, uint8_t word_size,
 			    uint8_t cs_idx, bool cs_active_hi, bool gpio_cs);
 
 /*

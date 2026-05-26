@@ -1,1 +1,0 @@
-add_subdirectory_ifdef(CONFIG_AMS_AS5047P ams_as5047p)
