@@ -45,12 +45,23 @@
 
 soc_reset_hook:
     /* ------------------------------------------------------------------ */
-    /* 1.  Disable SysTick before VTOR is redirected to our ISR table.    */
+    /* 1.  Disable SysTick + clear its NVIC pending bit before VTOR is    */
+    /*     redirected to our ISR table.                                   */
+    /*                                                                    */
+    /* Clearing CTRL alone is not enough: the YTM32 ROM bootloader can    */
+    /* leave the SysTick interrupt PENDING in SCB->ICSR.  Once Zephyr     */
+    /* releases BASEPRI after z_prep_c, the still-pending IRQ fires       */
+    /* through the new VTOR into sys_clock_isr, which then dereferences   */
+    /* timeout_list before z_data_copy has initialised it.                */
     /* ------------------------------------------------------------------ */
-    ldr  r0, =0xE000E010        /* SysTick->CTRL */
+    ldr  r0, =0xE000E010        /* SysTick->CTRL                          */
     movs r1, #0
     str  r1, [r0]               /* CTRL = 0: disable counter + interrupt  */
-    dsb                         /* ensure peripheral sees the write        */
+
+    ldr  r0, =0xE000ED04        /* SCB->ICSR                              */
+    ldr  r1, =0x02000000        /* PENDSTCLR (bit 25): clear pending SysTick */
+    str  r1, [r0]
+    dsb                         /* ensure both writes have taken effect    */
 
     /* ------------------------------------------------------------------ */
     /* 2.  ECC SRAM initialisation — write every word before any read.    */
