@@ -2,45 +2,74 @@
  * Copyright (c) 2026 YI JIN <jinyi_2001@foxmail.com>
  * SPDX-License-Identifier: Apache-2.0
  *
- * YTM32B1MC0 ECC SRAM initialization.
+ * soc_reset_hook — called from Zephyr reset.S (CONFIG_SOC_RESET_HOOK) after
+ * the MSP is set but BEFORE relocate_vector_table() changes VTOR.
  *
- * This chip has ECC-protected SRAM. After power-on reset, ECC checkbits are
- * in an undefined state. Any read from an uninitialized RAM address triggers
- * an ECC error (bus fault). ALL 32KB of SRAM must be written before it can
- * be safely read.
+ * Two responsibilities:
  *
- * This routine runs via CONFIG_SOC_EARLY_RESET_HOOK, which is called from
- * Zephyr's reset.S BEFORE the stack pointer is set up and before any C code
- * or RAM access occurs. It uses only registers (no stack) to fill the entire
- * SRAM range with a known pattern.
+ * 1. Disable SysTick (CTRL = 0).
+ *    The YTM32 ROM bootloader may leave SysTick running.  After
+ *    relocate_vector_table() our sys_clock_isr() becomes the SysTick
+ *    handler.  If a tick fires between that point and z_data_copy()
+ *    completing, sys_clock_announce() sees a stale timeout_list (timeout_list
+ *    is .data, not .bss — it holds a self-pointer as its initial value, which
+ *    is only valid after z_data_copy()).  This produces an MPU fault from
+ *    sys_dlist_remove dereferencing a NULL prev pointer, or an assertion
+ *    failure "Threads may not be created in ISRs" depending on the timing.
+ *    Disabling SysTick here closes the race completely; sys_clock_driver_init
+ *    (PRE_KERNEL_2) re-enables it with correct parameters.
  *
- * Memory map:
- *   SRAM start: 0x20000000
- *   SRAM end:   0x20008000 (32KB)
+ * 2. ECC SRAM initialisation.
+ *    YTM32B1M SRAM is ECC-protected.  ECC check-bits are undefined at
+ *    power-on reset; any read from an unwritten address generates a bus
+ *    fault.  We write the entire SRAM with a known pattern before any C
+ *    code (which may read globals) executes.
+ *
+ *    SRAM map:
+ *      YTM32B1MC0 — 0x20000000 .. 0x20008000  (32 KB)
+ *      YTM32B1MD1 — 0x1fff8000 .. 0x20008000  (64 KB)
+ *
+ * Implementation notes:
+ *   • Uses only r0-r3 and LR — no push/pop, so the uninitialised stack is
+ *     never read (ECC-safe entry and exit).
+ *   • Returns via bx lr (register-only, no stack pop).
  */
 
 .syntax unified
 .thumb
 
-.global soc_early_reset_hook
-.type soc_early_reset_hook, %function
-.section .text.soc_early_reset_hook, "ax"
+.global soc_reset_hook
+.type   soc_reset_hook, %function
+.section .text.soc_reset_hook, "ax"
 .align 2
 
-soc_early_reset_hook:
-    /* Fill pattern: 0x5A5A5A5A (same as vendor SDK RamInit0) */
-    ldr r0, =0x5A5A5A5A
-    mov r1, r0
+soc_reset_hook:
+    /* ------------------------------------------------------------------ */
+    /* 1.  Disable SysTick before VTOR is redirected to our ISR table.    */
+    /* ------------------------------------------------------------------ */
+    ldr  r0, =0xE000E010        /* SysTick->CTRL */
+    movs r1, #0
+    str  r1, [r0]               /* CTRL = 0: disable counter + interrupt  */
+    dsb                         /* ensure peripheral sees the write        */
 
-    /* SRAM range: 0x20000000 - 0x20008000 (32 KB) */
-    ldr r2, =0x20000000
-    ldr r3, =0x20008000
+    /* ------------------------------------------------------------------ */
+    /* 2.  ECC SRAM initialisation — write every word before any read.    */
+    /* ------------------------------------------------------------------ */
+    ldr  r0, =0x5A5A5A5A        /* fill pattern (matches vendor RamInit0) */
+    mov  r1, r0
+
+#if defined(CPU_YTM32B1MD1)
+    ldr  r2, =0x1fff8000        /* MD1: 64 KB SRAM starts here           */
+#else
+    ldr  r2, =0x20000000        /* MC0: 32 KB SRAM starts here           */
+#endif
+    ldr  r3, =0x20008000        /* both SoCs end at the same address     */
 
 .L_ecc_fill_loop:
-    stm r2!, {r0, r1}      /* Store 8 bytes per iteration, auto-increment r2 */
-    cmp r2, r3
-    blo .L_ecc_fill_loop    /* Loop until r2 >= r3 */
+    stm  r2!, {r0, r1}          /* store 8 bytes, advance r2             */
+    cmp  r2, r3
+    blo  .L_ecc_fill_loop
 
-    bx lr                   /* Return to reset.S */
+    bx   lr
 
-.size soc_early_reset_hook, . - soc_early_reset_hook
+.size soc_reset_hook, . - soc_reset_hook
