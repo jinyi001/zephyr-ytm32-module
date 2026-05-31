@@ -88,6 +88,10 @@ static int ytm32_system_clock_source_hz(const struct ytm32_soc_clock_config *cfg
 	}
 }
 
+void soc_prep_hook(void)
+{
+}
+
 void soc_early_init_hook(void)
 {
 	SystemInit();

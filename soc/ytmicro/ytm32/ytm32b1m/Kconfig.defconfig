@@ -13,6 +13,14 @@ config SYS_CLOCK_HW_CYCLES_PER_SEC
 config CORTEX_M_SYSTICK
 	default y
 
+# Run SoC preparation hook before Zephyr relocates vectors and clears/copies RAM.
+config SOC_PREP_HOOK
+	default y
+
+# Debug: prefill stacks with 0xaa so stack high-water usage can be inspected.
+config INIT_STACKS
+	default y
+
 # soc_reset_hook runs before VTOR is redirected, disabling SysTick to prevent
 # the bootloader's timer from firing through our sys_clock_isr before kernel
 # data (.data section) is initialised.  It also writes all SRAM to clear ECC.
