@@ -76,6 +76,31 @@ int ytm32_dma_hal_init(void)
 	return status_to_errno(s);
 }
 
+int ytm32_dma_hal_channel_init(uint8_t ch, uint8_t trigsrc)
+{
+	if (ch >= FEATURE_DMA_VIRTUAL_CHANNELS) {
+		return -EINVAL;
+	}
+
+	/*
+	 * No Zephyr-side callback is registered here: callers that use this entry
+	 * point (e.g. the vendor SPI master driver) install their own vendor DMA
+	 * callback for every transfer.  Keep s_ctx[ch] cleared so that a stray
+	 * dma_bridge_cb, should one ever fire for this channel, is a no-op.
+	 */
+	s_ctx[ch].cb        = NULL;
+	s_ctx[ch].user_data = NULL;
+
+	const dma_channel_config_t chan_cfg = {
+		.virtChnConfig = ch,
+		.source        = (dma_request_source_t)trigsrc,
+		.callback      = NULL,
+		.callbackParam = NULL,
+	};
+
+	return status_to_errno(DMA_DRV_ChannelInit(&s_chn[ch], &chan_cfg));
+}
+
 int ytm32_dma_hal_channel_config(uint8_t ch, uint8_t trigsrc,
 				 uintptr_t src, uintptr_t dst,
 				 uint8_t dir, uint8_t width, uint32_t length,
@@ -128,7 +153,8 @@ int ytm32_dma_hal_channel_config(uint8_t ch, uint8_t trigsrc,
 
 int ytm32_dma_hal_channel_config_loop(uint8_t ch, uint8_t trigsrc,
 				      uintptr_t src, uintptr_t dst,
-				      uint8_t width, uint32_t total_count,
+				      uint8_t width, uint32_t elements_per_req,
+				      uint32_t request_count,
 				      ytm32_dma_cb_t cb, void *user_data)
 {
 	dma_transfer_size_t xfer_size;
@@ -157,18 +183,19 @@ int ytm32_dma_hal_channel_config_loop(uint8_t ch, uint8_t trigsrc,
 	}
 
 	/*
-	 * Loop transfer: each hardware trigger moves one element (width bytes)
-	 * from the fixed src to the next dst slot.  After total_count triggers
-	 * the major (trigger) loop completes, the callback fires, and
-	 * destLastAddrAdjust rewinds dst back to the buffer start so a
-	 * subsequent dma_start() refills from scratch.
+	 * Loop transfer: each hardware request drains elements_per_req elements from
+	 * the fixed source (FIFO) to the linear destination buffer.  After
+	 * request_count requests the callback fires, and destLastAddrAdjust rewinds
+	 * dst back to the buffer start so a subsequent dma_start() refills from
+	 * scratch.
 	 */
+	uint32_t bytes_per_req = elements_per_req * (uint32_t)width;
+	uint32_t total_bytes = bytes_per_req * request_count;
 	dma_loop_transfer_config_t loop = {
-		.triggerLoopIterationCount  = total_count,
+		.triggerLoopIterationCount  = request_count,
 		.srcOffsetEnable            = false,
-		.dstOffsetEnable            = true,
-		/* After major loop: dst rewinds to buffer start */
-		.triggerLoopOffset          = -(int32_t)(total_count * (uint32_t)width),
+		.dstOffsetEnable            = false,
+		.triggerLoopOffset          = 0,
 		.transferLoopChnLinkEnable  = false,
 		.transferLoopChnLinkNumber  = 0U,
 		.triggerLoopChnLinkEnable   = false,
@@ -183,10 +210,10 @@ int ytm32_dma_hal_channel_config_loop(uint8_t ch, uint8_t trigsrc,
 		.srcOffset            = 0,                   /* FIFO address fixed */
 		.destOffset           = (int16_t)width,      /* advance each element */
 		.srcLastAddrAdjust    = 0,
-		.destLastAddrAdjust   = 0,                   /* handled by loop offset */
+		.destLastAddrAdjust   = -(int32_t)total_bytes,
 		.srcModulo            = DMA_MODULO_OFF,
 		.destModulo           = DMA_MODULO_OFF,
-		.transferLoopByteCount = (uint32_t)width,    /* one element per trigger */
+		.transferLoopByteCount = bytes_per_req,
 		.ramReloadEnable      = false,
 		.ramReloadNextDescAddr = 0U,
 		.interruptEnable      = true,

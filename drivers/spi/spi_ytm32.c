@@ -25,6 +25,10 @@ LOG_MODULE_REGISTER(spi_ytm32);
 
 /* Vendor types are fully hidden behind this wrapper header. */
 #include "ytm32_spi_hal.h"
+#ifdef CONFIG_SPI_YTM32_DMA
+/* Channel registration / DMAMUX trigger-source setup for SPI DMA mode. */
+#include "../dma/ytm32_dma_hal.h"
+#endif
 
 #define YTM32_SPI_INSTANCE_STRIDE 0x1000U
 
@@ -57,6 +61,8 @@ struct spi_ytm32_config {
 	const struct device *dma_dev;
 	uint8_t dma_tx_chan;
 	uint8_t dma_rx_chan;
+	uint8_t dma_tx_slot;   /* DMAMUX request source for the TX channel */
+	uint8_t dma_rx_slot;   /* DMAMUX request source for the RX channel */
 #endif
 };
 
@@ -398,13 +404,35 @@ static int spi_ytm32_init(const struct device *dev)
 
 #ifdef CONFIG_SPI_YTM32_DMA
 	if (cfg->dma_dev != NULL && device_is_ready(cfg->dma_dev)) {
-		use_dma         = true;
-		dma_tx          = cfg->dma_tx_chan;
-		dma_rx          = cfg->dma_rx_chan;
-		data->dma_active = true;
+		/*
+		 * Register the TX/RX channels and program their DMAMUX trigger
+		 * sources once here.  The vendor SPI master driver owns the
+		 * per-transfer descriptor/start sequence, but it relies on the
+		 * channels already being allocated with the correct request
+		 * source (e.g. SPI3: tx slot 61, rx slot 60).
+		 */
+		ret = ytm32_dma_hal_channel_init(cfg->dma_tx_chan, cfg->dma_tx_slot);
+		if (ret < 0) {
+			LOG_ERR("TX DMA ch%u (slot %u) init failed: %d",
+				cfg->dma_tx_chan, cfg->dma_tx_slot, ret);
+			return ret;
+		}
+
+		ret = ytm32_dma_hal_channel_init(cfg->dma_rx_chan, cfg->dma_rx_slot);
+		if (ret < 0) {
+			LOG_ERR("RX DMA ch%u (slot %u) init failed: %d",
+				cfg->dma_rx_chan, cfg->dma_rx_slot, ret);
+			return ret;
+		}
+
+		use_dma           = true;
+		dma_tx            = cfg->dma_tx_chan;
+		dma_rx            = cfg->dma_rx_chan;
+		data->dma_active  = true;
 		data->dma_tx_chan = dma_tx;
 		data->dma_rx_chan = dma_rx;
-		LOG_INF("DMA mode: tx ch%u, rx ch%u", dma_tx, dma_rx);
+		LOG_INF("DMA mode: tx ch%u (slot %u), rx ch%u (slot %u)",
+			dma_tx, cfg->dma_tx_slot, dma_rx, cfg->dma_rx_slot);
 	} else {
 		LOG_INF("interrupt mode (DMA not configured or not ready)");
 	}
@@ -459,7 +487,11 @@ static DEVICE_API(spi, spi_ytm32_api) = {
 	.dma_tx_chan = COND_CODE_1(DT_INST_NODE_HAS_PROP(n, dmas), \
 		(DT_INST_DMAS_CELL_BY_NAME(n, tx, channel)), (0U)), \
 	.dma_rx_chan = COND_CODE_1(DT_INST_NODE_HAS_PROP(n, dmas), \
-		(DT_INST_DMAS_CELL_BY_NAME(n, rx, channel)), (0U)),
+		(DT_INST_DMAS_CELL_BY_NAME(n, rx, channel)), (0U)), \
+	.dma_tx_slot = COND_CODE_1(DT_INST_NODE_HAS_PROP(n, dmas), \
+		(DT_INST_DMAS_CELL_BY_NAME(n, tx, trigsrc)), (0U)), \
+	.dma_rx_slot = COND_CODE_1(DT_INST_NODE_HAS_PROP(n, dmas), \
+		(DT_INST_DMAS_CELL_BY_NAME(n, rx, trigsrc)), (0U)),
 #else
 #define SPI_YTM32_DMA_FIELDS(n)
 #endif

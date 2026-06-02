@@ -34,6 +34,18 @@ typedef void (*ytm32_dma_cb_t)(void *user_data, int status);
 int ytm32_dma_hal_init(void);
 
 /*
+ * Register a DMA channel and its DMAMUX request source without programming any
+ * transfer descriptor.  Intended for peripherals (e.g. the vendor SPI master
+ * driver) that own the per-transfer DMA_DRV_ConfigMultiBlockTransfer() /
+ * InstallCallback() / StartChannel() sequence themselves but still need the
+ * channel allocated and its trigger source wired up once at init time.
+ *   ch      : virtual channel number (0 .. FEATURE_DMA_VIRTUAL_CHANNELS-1)
+ *   trigsrc : DMAMUX request source (dma_request_source_t numeric value)
+ * Returns 0 on success, negative errno on failure.
+ */
+int ytm32_dma_hal_channel_init(uint8_t ch, uint8_t trigsrc);
+
+/*
  * Configure and arm a DMA channel for a single-block transfer.
  *   ch         : virtual channel number (0 .. FEATURE_DMA_VIRTUAL_CHANNELS-1)
  *   trigsrc    : DMAMUX request source (dma_request_source_t numeric value)
@@ -75,26 +87,27 @@ void ytm32_dma_hal_error_irq(void);
 /*
  * Configure a channel for loop (major/minor) transfer.
  *
- * Intended for hardware-triggered peripherals like ADC where a fixed source
- * address (e.g. FIFO) is read 'total_count' times into a linear destination
- * buffer.  After 'total_count' triggers the callback fires and the destination
- * pointer wraps back to 'dst', ready for the next call to
- * ytm32_dma_hal_start().
+ * Intended for hardware-triggered peripherals like ADC where each hardware
+ * request drains a fixed number of elements from a fixed source address (e.g.
+ * FIFO) into a linear destination buffer.  After 'request_count' requests the
+ * callback fires and the destination pointer wraps back to 'dst', ready for the
+ * next call to ytm32_dma_hal_start().
  *
- *   ch          : virtual channel (0 .. FEATURE_DMA_VIRTUAL_CHANNELS-1)
- *   trigsrc     : DMAMUX request source (dma_request_source_t numeric value)
- *   src         : fixed source address (e.g. peripheral FIFO register)
- *   dst         : destination buffer start address
- *   width       : transfer element width in bytes (1, 2, or 4)
- *   total_count : total number of DMA trigger cycles before callback; the
- *                 destination buffer must hold total_count * width bytes
- *   cb          : completion callback (NULL allowed); called after total_count
- *                 elements have been transferred
- *   user_data   : opaque value forwarded to cb
+ *   ch              : virtual channel (0 .. FEATURE_DMA_VIRTUAL_CHANNELS-1)
+ *   trigsrc         : DMAMUX request source (dma_request_source_t numeric value)
+ *   src             : fixed source address (e.g. peripheral FIFO register)
+ *   dst             : destination buffer start address
+ *   width           : transfer element width in bytes (1, 2, or 4)
+ *   elements_per_req: elements transferred per hardware request
+ *   request_count   : number of hardware requests before callback
+ *   cb              : completion callback (NULL allowed); called after the
+ *                     full buffer has been transferred
+ *   user_data       : opaque value forwarded to cb
  */
 int ytm32_dma_hal_channel_config_loop(uint8_t ch, uint8_t trigsrc,
 				      uintptr_t src, uintptr_t dst,
-				      uint8_t width, uint32_t total_count,
+				      uint8_t width, uint32_t elements_per_req,
+				      uint32_t request_count,
 				      ytm32_dma_cb_t cb, void *user_data);
 
 #endif /* YTM32_DMA_HAL_H */

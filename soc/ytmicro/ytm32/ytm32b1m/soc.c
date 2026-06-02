@@ -9,6 +9,7 @@
 #else
 #include "system_YTM32B1MC0.h"
 #endif
+#include "device_registers.h"
 #include "clock.h"
 #include <zephyr/init.h>
 #include <zephyr/dt-bindings/clock/ytmicro,ytm32-soc-clock.h>
@@ -94,7 +95,24 @@ void soc_prep_hook(void)
 
 void soc_early_init_hook(void)
 {
-	SystemInit();
+	/*
+	 * Replicate the parts of the vendor SystemInit() that Zephyr does not
+	 * own, but intentionally DROP EfmInitMpu(): the Cortex-M MPU is now
+	 * configured by Zephyr (CONFIG_ARM_MPU + soc arm_mpu_regions.c). The FPU
+	 * (CPACR) is enabled earlier by Zephyr's z_arm_floating_point_init() when
+	 * CONFIG_FPU=y, so it is not repeated here.
+	 *
+	 * Ownership: R16 (EFM prefetch/DPD), R18 (CIM lockup), R15 (WDG0); MPU
+	 * migration tracked as C-MPU-EFMINIT-01 in BRINGUP_RESOURCE_OWNERSHIP.md.
+	 * Not calling SystemInit() lets --gc-sections drop SystemInit/EfmInitMpu.
+	 */
+	EFM->CTRL |= EFM_CTRL_DPD_EN_MASK | EFM_CTRL_PREFETCH_EN_MASK;
+	CIM->CTRL |= CIM_CTRL_LOCKUPEN_MASK;
+#if (DISABLE_WDOG)
+	WDG0->SVCR = 0xB631U;
+	WDG0->SVCR = 0xC278U;
+	WDG0->CR &= ~WDG_CR_EN_MASK;
+#endif
 }
 
 int ytm32_soc_apply_clock_config(const struct ytm32_soc_clock_config *cfg)
