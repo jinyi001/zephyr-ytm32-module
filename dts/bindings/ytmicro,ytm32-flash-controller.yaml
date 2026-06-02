@@ -1,0 +1,25 @@
+# Copyright (c) 2026 YI JIN <jinyi_2001@foxmail.com>
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  YTMicro YTM32 EFM (embedded flash module) controller.
+
+  The controller node must contain a "soc-nv-flash" child describing the
+  main array, with erase-block-size and write-block-size properties, e.g.:
+
+      efm: flash-controller@40010000 {
+          compatible = "ytmicro,ytm32-flash-controller";
+          reg = <0x40010000 0x1000>;
+          #address-cells = <1>;
+          #size-cells = <1>;
+          flash0: flash@0 {
+              compatible = "soc-nv-flash";
+              reg = <0x0 0x80000>;
+              erase-block-size = <1024>;
+              write-block-size = <8>;
+          };
+      };
+
+compatible: "ytmicro,ytm32-flash-controller"
+
+include: flash-controller.yaml

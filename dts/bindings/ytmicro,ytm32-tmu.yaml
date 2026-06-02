@@ -1,0 +1,48 @@
+# Copyright (c) 2026 YI JIN <jinyi_2001@foxmail.com>
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  YTMicro YTM32 TMU (Trigger MUX Unit).
+
+  The TMU routes peripheral trigger sources to target modules (e.g. an eTMR
+  counter-bottom pulse to the ADC external-trigger input).  Each target module
+  selects exactly one source.
+
+  Static routes may be described as child nodes; they are applied at driver
+  init.  Routes can also be set at runtime with ytm32_tmu_route().
+
+  Example:
+
+    #include <zephyr/dt-bindings/tmu/ytm32b1md1-tmu.h>
+
+    &tmu0 {
+        status = "okay";
+        route-etmr0-adc0 {
+            source = <YTM32_TMU_SRC_ETMR0_INIT_TRIG>;
+            target = <YTM32_TMU_TARGET_ADC0_EXT_TRIG>;
+        };
+    };
+
+compatible: "ytmicro,ytm32-tmu"
+
+include: base.yaml
+
+properties:
+  reg:
+    required: true
+
+  clocks:
+    required: true
+
+child-binding:
+  description: |
+    A single TMU route: connect one trigger source to one target module.
+  properties:
+    source:
+      type: int
+      required: true
+      description: Trigger source id (YTM32_TMU_SRC_* from the SoC dt-bindings).
+    target:
+      type: int
+      required: true
+      description: Target module id (YTM32_TMU_TARGET_* from the SoC dt-bindings).

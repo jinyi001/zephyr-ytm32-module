@@ -79,6 +79,22 @@ struct ytm32_module_clock_config {
 };
 
 static const struct ytm32_module_clock_config ytm32_fixed_module_clocks[] = {
+	/*
+	 * DMA is bus-clocked infrastructure with no functional clock mux, so the
+	 * SoC dtsi node carries no functional-clock-source property.  It still
+	 * needs its IPC clock gate enabled before DMA_DRV_Init() touches the
+	 * controller registers; register it here like the other gate-only
+	 * peripherals (the SRCSEL/DIV fields are ignored for DMA, matching the
+	 * vendor clock config's periSrc=0/div=0).
+	 */
+	{ YTM32_CLOCK_DMA, YTM32_CLOCK_SRC_FIRC, 1U },
+	/*
+	 * TMU is a gate-only trigger-routing block on the bus clock (no functional
+	 * clock mux), so its SoC dtsi node carries no functional-clock-source.
+	 * Register the gate here like DMA; SRCSEL/DIV are ignored for TMU.
+	 */
+	{ YTM32_CLOCK_TMU, YTM32_CLOCK_SRC_FIRC, 1U },
+	{ YTM32_CLOCK_CIM, YTM32_CLOCK_SRC_FIRC, 1U },
 	{ YTM32_CLOCK_GPIO, YTM32_CLOCK_SRC_FIRC, 1U },
 	{ YTM32_CLOCK_PCTRLA, YTM32_CLOCK_SRC_FIRC, 1U },
 	{ YTM32_CLOCK_PCTRLB, YTM32_CLOCK_SRC_FIRC, 1U },
