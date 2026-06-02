@@ -2,11 +2,13 @@
  * Copyright (c) 2026 YI JIN <jinyi_2001@foxmail.com>
  * SPDX-License-Identifier: Apache-2.0
  *
- * YTM32 ADC Phase 2 extension: hardware-triggered DMA continuous sampling.
+ * YTM32 ADC Phase 2 extension: DMA continuous sampling.
  *
  * This API supplements the standard Zephyr adc_read() interface for the
- * motor-drive use case where the ADC must be triggered by the PWM timer
- * (ETMR0) and results transferred to memory without CPU involvement.
+ * motor-drive use case where ADC results must be transferred to memory
+ * without CPU involvement.  Two trigger modes are offered (see
+ * enum adc_ytm32_dma_trigger): a working free-running software path, and a
+ * PWM-synchronised hardware path (eTMR→TMU) that is currently blocked on MD1.
  *
  * Usage:
  *   1. Configure channels with adc_channel_setup() as normal.
@@ -47,11 +49,43 @@ typedef void (*adc_ytm32_dma_cb_t)(const struct device *dev,
 				   void *user_data);
 
 /**
- * @brief Configuration for hardware-triggered DMA sampling.
+ * @brief DMA sampling trigger mode.
+ */
+enum adc_ytm32_dma_trigger {
+	/**
+	 * Free-running: the ADC self-clocks the sequence back-to-back (software
+	 * trigger + continuous conversion).  No eTMR/PWM synchronisation, but
+	 * fully working today — use this for general continuous sampling.
+	 */
+	ADC_YTM32_DMA_TRIGGER_SOFTWARE = 0,
+	/**
+	 * PWM-synchronised: each eTMR counter INIT-match emits one hardware
+	 * trigger so each DMA sequence is phase-aligned to the PWM period.
+	 *
+	 * Verified MD1 recipe (2026-06-02):
+	 *   eTMR0 OTRIG.INITTEN (via ytmicro,adc-sync-trigger DT property)
+	 *   → TMU INIT_TRIG(22) (via ytmicro,hw-trigger-source on adc0 DT node)
+	 *   → CIM ADC0_TRIG_SEL=2 (TMU synchronised by ADC functional clock)
+	 *   PTU is NOT required (RM §29.4.3.4).
+	 *
+	 * See trigger_chain.test_stage5_hw_chain for the hardware regression test.
+	 */
+	ADC_YTM32_DMA_TRIGGER_HARDWARE,
+};
+
+/**
+ * @brief Configuration for DMA continuous sampling.
  */
 struct adc_ytm32_dma_config {
 	/** Channel bitmask — same semantics as adc_sequence.channels. */
 	uint32_t channels;
+
+	/**
+	 * Trigger mode.  Defaults to ADC_YTM32_DMA_TRIGGER_SOFTWARE (0), the
+	 * working free-running path.  ADC_YTM32_DMA_TRIGGER_HARDWARE is the
+	 * PWM-synchronised path and is currently blocked on MD1 (see enum).
+	 */
+	enum adc_ytm32_dma_trigger trigger;
 
 	/** ADC resolution: 6, 8, 10, or 12 bits. */
 	uint8_t resolution;
@@ -76,16 +110,32 @@ struct adc_ytm32_dma_config {
 };
 
 /**
- * @brief Start hardware-triggered DMA continuous sampling.
+ * @brief Start DMA continuous sampling.
  *
- * Configures the ADC for hardware trigger mode, routes the TMU trigger
- * source (from DTS ytmicro,hw-trigger-source) to ADC0_EXT_TRIG, and arms
- * the DMA channel to drain the FIFO into buf on every sequence completion.
+ * Arms the DMA channel to drain the ADC FIFO into buf on every sequence
+ * completion; the callback fires once per 'depth' sequences and re-arms
+ * automatically.
+ *
+ * Trigger mode (cfg->trigger):
+ * - ADC_YTM32_DMA_TRIGGER_SOFTWARE (default): the ADC free-runs in continuous
+ *   conversion mode.  Working path; no eTMR/PWM dependency.
+ * - ADC_YTM32_DMA_TRIGGER_HARDWARE: PWM-synchronised via eTMR→TMU.  Requires
+ *   ytmicro,hw-trigger-source + ytmicro,tmu in DTS and a running ETMR0 with
+ *   OTRIG configured.  BLOCKED on MD1 (see enum / UNTESTED.md).
  *
  * The calling code is responsible for ensuring:
- * - ETMR0 is configured and running in center-aligned PWM mode.
- * - ETMR0 OTRIG register has INITTEN=1 to emit the trigger on counter=0.
  * - adc_channel_setup() has been called for every channel in cfg->channels.
+ * - (hardware mode only) ETMR0 is configured and running in center-aligned
+ *   PWM mode with OTRIG emitting the per-period trigger.
+ *
+ * @note Errata E600001: the hardware-trigger period MUST stay below 5 ms.  The
+ *       motor-drive use case (PWM trigger every ~50 µs) satisfies this, and
+ *       continuous (LOOP) sampling at that rate is unaffected by the errata.
+ *       For trigger periods above 5 ms the first channel of each sequence would
+ *       read an inaccurate value; the errata's workaround there is to convert
+ *       the first channel twice and discard the first result (reducing the
+ *       usable channel count to 7).  That slow-trigger workaround is NOT
+ *       implemented here because it is not needed for motor drive.
  *
  * @param dev ADC device (e.g. DEVICE_DT_GET(DT_NODELABEL(adc0)))
  * @param cfg DMA sampling configuration

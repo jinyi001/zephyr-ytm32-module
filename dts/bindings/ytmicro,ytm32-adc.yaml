@@ -46,8 +46,29 @@ properties:
     required: false
     description: |
       TMU trigger source index routed to ADC0_EXT_TRIG.
-      Example: 22 = TMU_TRIG_SOURCE_eTMR0_INIT_TRIG.
+      Example: YTM32_TMU_SRC_ETMR0_INIT_TRIG (22).
       When absent, only software-triggered mode is available.
+
+  ytmicro,tmu:
+    type: phandle
+    required: false
+    description: |
+      TMU device used to route ytmicro,hw-trigger-source to the ADC external
+      trigger input when hardware-triggered DMA sampling is started.
+      Required together with ytmicro,hw-trigger-source for Phase 2 DMA mode.
+
+  ytmicro,cim-trigger-select:
+    type: int
+    required: false
+    default: 2
+    description: |
+      CIM ADC0_TRIG_SEL field value selecting the hardware trigger source.
+      Values (YTM32B1MD1 SVD, CIM_CTRL register):
+        0 = PTU output
+        1 = TMU output synchronised by bus clock
+        2 = TMU output synchronised by ADC functional clock (recommended, default)
+      Bus-clock sync (1) can drop the trigger edge on MD1 when the ADC
+      functional clock is slow relative to the bus clock.
 
   "#io-channel-cells":
     const: 1

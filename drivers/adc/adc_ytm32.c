@@ -31,12 +31,39 @@
 #include <zephyr/sys/util.h>
 
 #include "adc_driver.h"
-#include "tmu_driver.h"
 #include "../dma/ytm32_dma_hal.h"
 #include <zephyr/drivers/adc/adc_ytm32.h>
+#include <zephyr/drivers/misc/ytm32_tmu.h>
+#include <zephyr/dt-bindings/tmu/ytm32b1md1-tmu.h>
+#include <zephyr/dt-bindings/clock/ytmicro,ytm32b1md1-clock.h>
+#include <zephyr/dt-bindings/adc/ytm32b1md1-adc.h>
 
 #define ADC_CONTEXT_USES_KERNEL_TIMER
 #include "adc_context.h"
+
+/*
+ * Errata E600001 (vendor numbering: ADC_ERRATA_E0002).
+ *
+ * After the ADC has been enabled but left idle for a long time (>1 s, or ~5 ms
+ * at high temperature), the FIRST channel of the next conversion sequence reads
+ * an inaccurate value.  This affects both software- and hardware-triggered
+ * conversions; continuous conversion is unaffected.
+ *
+ * Software-trigger workaround (recommended by the errata): IPC-reset the ADC
+ * immediately before each conversion.  The vendor HAL implements exactly this
+ * inside ADC_Enable() (adc_hw_access.h), guarded by ADC_ERRATA_E0002, and the
+ * Phase 1 path below reaches it on every read via adc_context_start_sampling()
+ * -> ADC_DRV_Start() -> ADC_Enable().  This keeps ALL channels (including the
+ * first) accurate, so — unlike the hardware-trigger workaround — no channel
+ * slot has to be sacrificed.
+ *
+ * The mitigation therefore depends entirely on the HAL macro staying defined.
+ * If a future HAL bump drops it, software reads would silently start returning
+ * bad first-channel data, so fail the build loudly instead.
+ */
+#if !defined(ADC_ERRATA_E0002)
+#error "ADC_ERRATA_E0002 not defined by HAL — E600001 first-channel workaround is disabled"
+#endif
 
 LOG_MODULE_REGISTER(adc_ytm32, CONFIG_ADC_LOG_LEVEL);
 
@@ -46,10 +73,9 @@ LOG_MODULE_REGISTER(adc_ytm32, CONFIG_ADC_LOG_LEVEL);
 /* ADC FIFO register offset within ADC peripheral (from the struct layout) */
 #define YTM32_ADC_FIFO_OFFSET 0x4CU
 
-/* TMU instance is always 0 on this SoC */
-#define YTM32_TMU_INSTANCE 0U
-/* TMU target: ADC0 external trigger input */
-#define YTM32_TMU_TARGET_ADC0_EXT_TRIG TMU_TARGET_MODULE_ADC0_EXT_TRIG
+/* YTM32_TMU_TARGET_ADC0_EXT_TRIG comes from dt-bindings/tmu/ytm32b1md1-tmu.h.
+ * CIM trigger-select values come from dt-bindings/adc/ytm32b1md1-adc.h.
+ */
 
 /* Sentinel meaning "no hardware trigger configured" */
 #define YTM32_ADC_NO_HW_TRIG UINT32_MAX
@@ -69,6 +95,8 @@ struct adc_ytm32_config {
 	uint8_t                          dma_channel;
 	uint8_t                          dma_slot;    /* DMAMUX request source */
 	uint32_t                         hw_trig_src; /* TMU trigger source enum value */
+	const struct device             *tmu_dev;    /* NULL if no TMU phandle */
+	uint32_t                         cim_trig_sel; /* CIM ADC0_TRIG_SEL field value */
 };
 
 struct adc_ytm32_data {
@@ -252,6 +280,12 @@ static void adc_context_start_sampling(struct adc_context *ctx)
 		       + (size_t)ctx->sampling_index * slot;
 
 	conv.sequenceConfig.totalChannels     = slot;
+	/*
+	 * LOOP (continuous) mode — must NOT be changed to discontinuous: the
+	 * E600001 software-trigger workaround (see top-of-file note) is only
+	 * valid for single/continuous mode, not discontinuous single-channel
+	 * triggering.  The ISR stops the ADC after one end-of-sequence.
+	 */
 	conv.sequenceConfig.sequenceMode      = ADC_CONV_LOOP;
 	conv.sequenceConfig.sequenceIntEnable = true;
 	conv.sequenceConfig.ovrunIntEnable    = true;
@@ -261,6 +295,11 @@ static void adc_context_start_sampling(struct adc_context *ctx)
 	conv.align        = ADC_ALIGN_RIGHT;
 
 	ADC_DRV_ConfigConverter(inst, &conv);
+	/*
+	 * ADC_DRV_Start() -> ADC_Enable() performs the E600001 IPC reset before
+	 * every conversion, so the first channel stays accurate even after a
+	 * long idle period.
+	 */
 	ADC_DRV_Start(inst);
 }
 
@@ -310,21 +349,44 @@ static void adc_ytm32_isr(const struct device *dev)
 
 /* ──────────────────────── Phase 2: TMU helper ──────────────────────── */
 
-static int adc_ytm32_tmu_route(uint32_t trig_src)
+static int adc_ytm32_tmu_route(const struct device *dev, uint32_t trig_src)
 {
-	/*
-	 * Enable TMU clock via vendor SDK directly (no Zephyr TMU driver).
-	 * TMU_CLK = 25 on MD1.
-	 */
-	extern void CLOCK_DRV_SetModuleClock(uint32_t clockName, bool gate,
-					     uint32_t src, uint32_t div);
-	CLOCK_DRV_SetModuleClock(25U /* TMU_CLK */, true, 0U, 0U);
+	const struct adc_ytm32_config *config = dev->config;
 
-	return (TMU_DRV_SetTrigSourceForTargetModule(
-			YTM32_TMU_INSTANCE,
-			YTM32_TMU_TARGET_ADC0_EXT_TRIG,
-			(tmu_trigger_source_t)trig_src) == STATUS_SUCCESS)
-		? 0 : -EIO;
+	if (config->tmu_dev == NULL) {
+		LOG_ERR("ytmicro,tmu phandle not set in DTS");
+		return -ENOTSUP;
+	}
+	if (!device_is_ready(config->tmu_dev)) {
+		LOG_ERR("TMU device not ready");
+		return -ENODEV;
+	}
+
+	/* Route the configured trigger source to the ADC0 external-trigger input.
+	 * The TMU driver owns the TMU clock, so no manual clock poke here.
+	 */
+	return ytm32_tmu_route(config->tmu_dev, trig_src,
+				       YTM32_TMU_TARGET_ADC0_EXT_TRIG);
+}
+
+#if !defined(CIM_CTRL_ADC0_TRIG_SEL_MASK) || !defined(CIM_CTRL_ADC0_TRIG_SEL_SHIFT)
+#error "CIM_CTRL_ADC0_TRIG_SEL_MASK/_SHIFT not defined by HAL — hardware trigger requires CIM support"
+#endif
+
+static void adc_ytm32_select_hw_trigger_input(const struct device *dev)
+{
+	const struct adc_ytm32_config *config = dev->config;
+
+	(void)clock_control_on(config->clock_dev,
+			       (clock_control_subsys_t)YTM32_CLOCK_CIM);
+
+	if (config->instance == 0U) {
+		uint32_t ctrl = CIM->CTRL;
+
+		ctrl &= ~CIM_CTRL_ADC0_TRIG_SEL_MASK;
+		ctrl |= CIM_CTRL_ADC0_TRIG_SEL(config->cim_trig_sel);
+		CIM->CTRL = ctrl;
+	}
 }
 
 /* ──────────────────────── Phase 2: DMA callback ──────────────────────── */
@@ -358,6 +420,37 @@ static void adc_ytm32_dma_cb(void *user_data, int hal_status)
 	ytm32_dma_hal_start(config->dma_channel);
 }
 
+/* ──────────────────────── Phase 2: internal helpers ─────────────────── */
+
+/*
+ * MD1 workaround: clear stale ADSTART state via ADSTOP→ADSTART.
+ * Without this, the hardware-trigger accept gate is not reliably armed after
+ * ADC_DRV_Enable() + ADRDY.  Verified: ADSTOP→ADSTART immediately enables
+ * trigger acceptance from INIT_TRIG(22).
+ * Failure mode without this: k_sem_take timeout in trigger_chain stage5.
+ */
+static int adc_ytm32_arm_hw_trigger(const struct device *dev)
+{
+	const struct adc_ytm32_config *config = dev->config;
+	ADC_Type *base = (ADC_Type *)config->base;
+
+	/* MD1 workaround: clear stale ADSTART state via ADSTOP→ADSTART.
+	 * Without this, the hardware-trigger accept gate is not reliably armed
+	 * after ADC_DRV_Enable() + ADRDY.  Use a bare counter loop — k_busy_wait
+	 * was found to interfere with the trigger acceptance timing on MD1.
+	 * Verified: ADSTOP→ADSTART immediately enables trigger acceptance from
+	 * INIT_TRIG(22).  Failure mode: k_sem_take timeout in stage5.
+	 */
+	base->CTRL |= ADC_CTRL_ADSTOP_MASK;
+	for (uint32_t i = 0; i < 10000U; i++) {
+		if ((base->CTRL & ADC_CTRL_ADSTOP_MASK) == 0U) {
+			break;
+		}
+	}
+	base->CTRL |= ADC_CTRL_ADSTART_MASK;
+	return 0;
+}
+
 /* ──────────────────────── Phase 2: public API ──────────────────────── */
 
 int adc_ytm32_dma_start(const struct device *dev,
@@ -369,11 +462,13 @@ int adc_ytm32_dma_start(const struct device *dev,
 	uint8_t max_smp;
 	int ret;
 
+	const bool hw_trig = (cfg->trigger == ADC_YTM32_DMA_TRIGGER_HARDWARE);
+
 	if (config->dma_dev == NULL) {
 		LOG_ERR("DMA not configured in DTS for this ADC instance");
 		return -ENOTSUP;
 	}
-	if (config->hw_trig_src == YTM32_ADC_NO_HW_TRIG) {
+	if (hw_trig && config->hw_trig_src == YTM32_ADC_NO_HW_TRIG) {
 		LOG_ERR("hw-trigger-source not set in DTS");
 		return -ENOTSUP;
 	}
@@ -403,14 +498,21 @@ int adc_ytm32_dma_start(const struct device *dev,
 	data->dma_cfg     = *cfg;
 	data->channel_count = ch_count;
 
-	/* 1. Route TMU: ETMR0_INIT_TRIG → ADC0_EXT_TRIG */
-	ret = adc_ytm32_tmu_route(config->hw_trig_src);
-	if (ret < 0) {
-		return ret;
+	/* 1. (hardware mode) Route the eTMR trigger via TMU to ADC0_EXT_TRIG and
+	 * select the TMU output as ADC0's top-level hardware-trigger input.
+	 * Software mode self-clocks the sequence, so no trigger fabric is needed.
+	 */
+	if (hw_trig) {
+		ret = adc_ytm32_tmu_route(dev, config->hw_trig_src);
+		if (ret < 0) {
+			return ret;
+		}
+		adc_ytm32_select_hw_trigger_input(dev);
 	}
 
-	/* 2. Configure DMA: FIFO → buffer, total_count = ch_count × depth */
-	uint32_t total = (uint32_t)ch_count * cfg->depth;
+	/* 2. Configure DMA: each ADC DMA request drains one full channel sequence;
+	 * after 'depth' sequences the user buffer is full.
+	 */
 	uintptr_t fifo_addr = (uintptr_t)(config->base + YTM32_ADC_FIFO_OFFSET);
 
 	ret = ytm32_dma_hal_channel_config_loop(
@@ -419,7 +521,8 @@ int adc_ytm32_dma_start(const struct device *dev,
 		fifo_addr,
 		(uintptr_t)cfg->buf,
 		sizeof(uint16_t),
-		total,
+		ch_count,
+		cfg->depth,
 		adc_ytm32_dma_cb,
 		(void *)dev);
 	if (ret < 0) {
@@ -427,34 +530,65 @@ int adc_ytm32_dma_start(const struct device *dev,
 		return ret;
 	}
 
-	/* 3. Configure ADC: hardware trigger, DMA enabled, no interrupts */
+	/* 3. Configure ADC: DMA enabled, no interrupts.
+	 * - hardware mode: external trigger drives one sequence per eTMR period
+	 *   (LOOP = one sequence per trigger).
+	 * - software mode: free-running continuous conversion self-clocks the
+	 *   sequence back-to-back.
+	 */
 	ADC_DRV_InitConverterStruct(&conv);
 	channels_to_sequence(cfg->channels, conv.sequenceConfig.channels,
 			     data->sample_time, &max_smp);
 
 	conv.sequenceConfig.totalChannels     = ch_count;
-	conv.sequenceConfig.sequenceMode      = ADC_CONV_LOOP;
+	conv.sequenceConfig.sequenceMode      = hw_trig ? ADC_CONV_LOOP
+							: ADC_CONV_CONTINUOUS;
 	conv.sequenceConfig.sequenceIntEnable = false;
 	conv.sequenceConfig.ovrunIntEnable    = false;
 	conv.sampleTime   = max_smp;
 	conv.clockDivider = (adc_clk_divide_t)config->clk_div;
 	conv.resolution   = bits_to_resolution(cfg->resolution);
 	conv.align        = ADC_ALIGN_RIGHT;
-	conv.trigger      = ADC_TRIGGER_HARDWARE;
+	conv.trigger      = hw_trig ? ADC_TRIGGER_HARDWARE : ADC_TRIGGER_SOFTWARE;
 	conv.dmaEnable    = true;
-	/* watermark=0: DMA request fires on every FIFO write (one sample at a time) */
-	conv.dmaWaterMark = 0U;
+	/* DMA request fires once one full channel sequence is in the FIFO. */
+	conv.dmaWaterMark = ch_count - 1U;
 
 	ADC_DRV_ConfigConverter(config->instance, &conv);
 
-	/* 4. Start DMA then enable ADC (order matters: DMA ready before first trigger) */
+	/* 4. Start DMA before arming the ADC (order matters: DMA must be ready
+	 * before the first conversion can fill the FIFO).  Software-triggered
+	 * continuous mode can use ADC_DRV_Start() directly.  Hardware-triggered
+	 * mode needs a stricter MD1 arm sequence below: enable, wait ADRDY, clear
+	 * stale start state, then assert ADSTART so TMU/eTMR trigger edges are
+	 * accepted.
+	 */
 	ret = ytm32_dma_hal_start(config->dma_channel);
 	if (ret < 0) {
 		return ret;
 	}
 
 	data->dma_active = true;
-	ADC_DRV_Enable(config->instance);
+	if (hw_trig) {
+		/* On MD1 the hardware-trigger gate only arms reliably when ADSTART
+		 * is asserted after ADRDY.  Enable first, poll ready, then arm.
+		 */
+		ADC_DRV_Enable(config->instance);
+		for (uint32_t i = 0; i < 10000U; i++) {
+			if (ADC_DRV_GetReadyFlag(config->instance)) {
+				break;
+			}
+		}
+		ret = adc_ytm32_arm_hw_trigger(dev);
+		if (ret < 0) {
+			data->dma_active = false;
+			ytm32_dma_hal_stop(config->dma_channel);
+			ytm32_dma_hal_channel_release(config->dma_channel);
+			return ret;
+		}
+	} else {
+		ADC_DRV_Start(config->instance);
+	}
 
 	return 0;
 }
@@ -553,6 +687,11 @@ static DEVICE_API(adc, adc_ytm32_driver_api) = {
 		(DT_INST_PROP(inst, ytmicro_hw_trigger_source)), \
 		(YTM32_ADC_NO_HW_TRIG))
 
+#define YTM32_ADC_TMU_DEV(inst) \
+	COND_CODE_1(DT_INST_NODE_HAS_PROP(inst, ytmicro_tmu), \
+		(DEVICE_DT_GET(DT_INST_PHANDLE(inst, ytmicro_tmu))), \
+		(NULL))
+
 #define YTM32_ADC_INIT(inst)							\
 	PINCTRL_DT_INST_DEFINE(inst);						\
 										\
@@ -579,6 +718,10 @@ static DEVICE_API(adc, adc_ytm32_driver_api) = {
 		.dma_channel  = YTM32_ADC_DMA_CH(inst),			\
 		.dma_slot     = YTM32_ADC_DMA_SLOT(inst),			\
 		.hw_trig_src  = YTM32_ADC_HW_TRIG(inst),			\
+		.tmu_dev      = YTM32_ADC_TMU_DEV(inst),			\
+		.cim_trig_sel = DT_INST_PROP_OR(inst,				\
+				ytmicro_cim_trigger_select,			\
+				YTM32B1MD1_CIM_ADC0_TRIG_SEL_TMU_ADCCLK),	\
 	};									\
 										\
 	static struct adc_ytm32_data adc_ytm32_data_##inst = {			\

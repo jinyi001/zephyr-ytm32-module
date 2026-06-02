@@ -75,6 +75,36 @@ properties:
       Initial PWM switching frequency in Hz used during driver init.
       The first pwm_set_cycles() call will override this.
 
+  ytmicro,adc-sync-trigger:
+    type: boolean
+    description: |
+      Emit a hardware INIT-match output trigger that drives the
+      eTMR<n>_INIT_TRIG TMU source used to hardware-trigger the ADC
+      (eTMR -> TMU -> ADC -> DMA chain) on MD1.  The trigger fires on the
+      counter-bottom INIT match (OTRIG.INITTEN), the canonical instant to
+      sample phase currents for center-aligned motor PWM.  The driver widens
+      the pulse so it survives CIM resampling onto the ADC function clock.
+
+  ytmicro,adc-trigger-width:
+    type: int
+    required: false
+    default: 16
+    description: |
+      eTMR output trigger pulse width in counter clock cycles.
+      Must be wide enough to be captured by CIM at the ADC functional clock.
+      The minimum safe value depends on the ratio of eTMR clock to ADC
+      functional clock. Default 16 cycles is empirically verified at 48 MHz
+      eTMR / 4 MHz ADC (FXOSC ÷4).
+
+  ytmicro,autostart:
+    type: boolean
+    description: |
+      Start the eTMR counter during driver initialisation.
+      When absent (default), the counter is configured but not started;
+      use this in applications that explicitly start PWM at boot.
+      Motor applications and trigger-chain tests should set this property;
+      non-motor users of the board should not.
+
   "#pwm-cells":
     const: 3
 

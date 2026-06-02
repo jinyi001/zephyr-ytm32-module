@@ -5,6 +5,7 @@
 
 #include <arm/armv8-m.dtsi>
 #include <zephyr/dt-bindings/clock/ytmicro,ytm32b1md1-clock.h>
+#include <zephyr/dt-bindings/tmu/ytm32b1md1-tmu.h>
 
 / {
 	model = "YTMicro YTM32B1MD1";
@@ -47,9 +48,19 @@
 	};
 
 	soc {
-		flash0: flash@0 {
-			compatible = "soc-nv-flash";
-			reg = <0x00000000 0x80000>;
+		efm: flash-controller@40010000 {
+			compatible = "ytmicro,ytm32-flash-controller";
+			reg = <0x40010000 0x1000>;
+			#address-cells = <1>;
+			#size-cells = <1>;
+			status = "okay";
+
+			flash0: flash@0 {
+				compatible = "soc-nv-flash";
+				reg = <0x00000000 0x80000>;
+				erase-block-size = <1024>;
+				write-block-size = <8>;
+			};
 		};
 
 		sram0: memory@1fff8000 {
@@ -156,13 +167,18 @@
 			clocks = <&cgu YTM32_CLOCK_ADC0>;
 			ytmicro,functional-clock-source = <YTM32_CLOCK_SRC_FXOSC>;
 			ytmicro,functional-clock-divider = <3>;
-			/* ch8, DMA_REQ_ADC0 = 42 — ch0~ch7 are reserved for SPI0~SPI3 */
-			dmas = <&dma0 8 42>;
-			dma-names = "rx";
-			/* TMU_TRIG_SOURCE_eTMR0_INIT_TRIG = 22 (counter bottom, best for motor drive) */
-			ytmicro,hw-trigger-source = <22>;
 			#io-channel-cells = <1>;
 			status = "disabled";
+			/* DMA channel, hw-trigger-source, tmu, and cim-trigger-select
+			 * are board-level resource decisions — set them in board DTS.
+			 */
+		};
+
+		tmu0: tmu@40048000 {
+			compatible = "ytmicro,ytm32-tmu";
+			reg = <0x40048000 0x1000>;
+			clocks = <&cgu YTM32_CLOCK_TMU>;
+			status = "okay";
 		};
 
 		etmr0: etmr@40049000 {

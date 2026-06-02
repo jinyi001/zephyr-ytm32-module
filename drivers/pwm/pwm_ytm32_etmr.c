@@ -38,6 +38,14 @@ struct pwm_ytm32_config {
 	uint32_t deadtime_ns;
 	/* Initial PWM frequency used during eTMR_DRV_InitPwm */
 	uint32_t pwm_freq_hz;
+	/* Emit an INIT-match output trigger (drives the TMU eTMR<n>_INIT_TRIG
+	 * source for ADC hardware triggering — see SetOutputTrigger below)
+	 */
+	bool adc_sync_trigger;
+	/* Output trigger pulse width in counter clock cycles (DT ytmicro,adc-trigger-width) */
+	uint32_t adc_trigger_width;
+	/* Start the eTMR counter at driver init (DT ytmicro,autostart) */
+	bool autostart;
 };
 
 struct pwm_ytm32_data {
@@ -151,9 +159,14 @@ static void pwm_ytm32_handle_ovf(const struct device *dev)
 {
 	const struct pwm_ytm32_config *cfg = dev->config;
 	struct pwm_ytm32_data *data = dev->data;
-	eTMR_Type *base = g_etmrBase[cfg->instance];
 
-	base->STS = eTMR_TIME_OVER_FLOW_FLAG;
+	/*
+	 * Clear the timer-overflow flag.  The STS TOF flag is bit 13
+	 * (eTMR_STS_TOF_MASK = 0x2000); the eTMR_TIME_OVER_FLOW_FLAG enum
+	 * (0x1000) is a different bit and does NOT clear it — writing that
+	 * leaves TOF asserted and the OVF interrupt re-fires forever.
+	 */
+	eTMR_DRV_ClearTofFlag(cfg->instance);
 
 	if (data->ovf_cb) {
 		data->ovf_cb(data->ovf_user_data);
@@ -224,10 +237,29 @@ static int pwm_ytm32_init(const struct device *dev)
 		return ret;
 	}
 
-	/* 1. Initialise the base timer (counter, prescaler, sync) */
+	/* 1. Initialise the base timer (counter, prescaler, sync).
+	 *
+	 * The SDK's etmrPrescaler is the divide count and it programs the
+	 * CLKPRS field as (etmrPrescaler - 1).  Our DT 'prescaler' is a
+	 * power-of-two shift (0→÷1, 1→÷2, …, matching counter_freq()'s
+	 * `clk >> prescaler`), so pass 2^prescaler as the divide count.
+	 * Passing the raw shift would underflow to CLKPRS=0x7F (÷128).
+	 */
+	etmr_trig_config_t trig_cfg = {
+		.trigSrc                = TRIGGER_FROM_MATCHING_EVENT,
+		.pwmOutputChannel       = 0U,
+		.outputTrigWidth        = (uint16_t)cfg->adc_trigger_width,
+		.outputTrigFreq         = 1U,
+		.modMatchTrigEnable     = false,
+		.midMatchTrigEnable     = false,
+		.initMatchTrigEnable    = true,
+		.numOfChannels          = 0U,
+		.channelTrigParamConfig = NULL,
+	};
+
 	etmr_user_config_t user_cfg = {
 		.etmrClockSource = eTMR_CLOCK_SOURCE_INTERNALCLK,
-		.etmrPrescaler   = cfg->prescaler,
+		.etmrPrescaler   = (uint8_t)BIT(cfg->prescaler),
 		.debugMode       = false,
 		.syncMethod      = NULL,
 		.outputTrigConfig = NULL,
@@ -292,7 +324,33 @@ static int pwm_ytm32_init(const struct device *dev)
 		return -EIO;
 	}
 
+	/* InitPwm rewrites timer registers, so configure OTRIG after PWM init. */
+	if (cfg->adc_sync_trigger) {
+		s = eTMR_DRV_SetOutputTrigger(cfg->instance, &trig_cfg);
+		if (s != STATUS_SUCCESS) {
+			LOG_ERR("eTMR_DRV_SetOutputTrigger failed (%d)", s);
+			return -EIO;
+		}
+		LOG_DBG("eTMR%u output trigger enabled for ADC sync", cfg->instance);
+	}
+
+	/*
+	 * 4. ADC-sync output trigger is configured as part of eTMR_DRV_Init()
+	 *    above, matching the SDK/FAE initialization order.  It emits a widened
+	 *    INIT-match pulse on eTMR<n>_INIT_TRIG for the TMU route.
+	 */
+
 	data->period_cycles = counter_freq(cfg, data) / cfg->pwm_freq_hz;
+
+	/*
+	 * 5. Optionally start the counter.  eTMR_DRV_Init/InitPwm only configure
+	 *    the module; the counter does not run until CTRL.EN is set.
+	 *    Only start if ytmicro,autostart is set in DTS — this prevents
+	 *    unintended PWM output on non-motor applications at boot.
+	 */
+	if (cfg->autostart) {
+		eTMR_DRV_Enable(cfg->instance);
+	}
 
 	k_mutex_init(&data->lock);
 
@@ -350,6 +408,11 @@ static const struct pwm_driver_api pwm_ytm32_driver_api = {
 				ytmicro_deadtime_ns, 0),		\
 		.pwm_freq_hz = DT_INST_PROP_OR(inst,			\
 				ytmicro_pwm_frequency_hz, 20000),	\
+		.adc_sync_trigger = DT_INST_PROP(inst,			\
+				ytmicro_adc_sync_trigger),		\
+		.adc_trigger_width = DT_INST_PROP_OR(inst,		\
+				ytmicro_adc_trigger_width, 16U),	\
+		.autostart = DT_INST_PROP(inst, ytmicro_autostart),	\
 	};								\
 									\
 	static struct pwm_ytm32_data pwm_ytm32_data_##inst;		\
