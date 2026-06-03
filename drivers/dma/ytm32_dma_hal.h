@@ -110,4 +110,10 @@ int ytm32_dma_hal_channel_config_loop(uint8_t ch, uint8_t trigsrc,
 				      uint32_t request_count,
 				      ytm32_dma_cb_t cb, void *user_data);
 
+int ytm32_dma_hal_channel_config_loop_reload(uint8_t ch, uint8_t trigsrc,
+					     uintptr_t src, uintptr_t dst,
+					     uint8_t width, uint32_t elements_per_req,
+					     uint32_t request_count,
+					     ytm32_dma_cb_t cb, void *user_data);
+
 #endif /* YTM32_DMA_HAL_H */

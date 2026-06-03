@@ -408,16 +408,12 @@ static void adc_ytm32_dma_cb(void *user_data, int hal_status)
 		return;
 	}
 
-	/* Notify user with the completed buffer */
 	if (data->dma_cfg.cb != NULL) {
 		data->dma_cfg.cb(dev, data->dma_cfg.buf,
 				 data->channel_count,
 				 data->dma_cfg.depth,
 				 data->dma_cfg.user_data);
 	}
-
-	/* Re-arm DMA for next batch; ADC keeps running (hardware trigger) */
-	ytm32_dma_hal_start(config->dma_channel);
 }
 
 /* ──────────────────────── Phase 2: internal helpers ─────────────────── */
@@ -515,7 +511,7 @@ int adc_ytm32_dma_start(const struct device *dev,
 	 */
 	uintptr_t fifo_addr = (uintptr_t)(config->base + YTM32_ADC_FIFO_OFFSET);
 
-	ret = ytm32_dma_hal_channel_config_loop(
+	ret = ytm32_dma_hal_channel_config_loop_reload(
 		config->dma_channel,
 		config->dma_slot,
 		fifo_addr,

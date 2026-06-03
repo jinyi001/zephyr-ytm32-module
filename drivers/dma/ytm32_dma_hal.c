@@ -151,11 +151,12 @@ int ytm32_dma_hal_channel_config(uint8_t ch, uint8_t trigsrc,
 	return 0;
 }
 
-int ytm32_dma_hal_channel_config_loop(uint8_t ch, uint8_t trigsrc,
-				      uintptr_t src, uintptr_t dst,
-				      uint8_t width, uint32_t elements_per_req,
-				      uint32_t request_count,
-				      ytm32_dma_cb_t cb, void *user_data)
+static int config_loop_transfer(uint8_t ch, uint8_t trigsrc,
+					uintptr_t src, uintptr_t dst,
+					uint8_t width, uint32_t elements_per_req,
+					uint32_t request_count,
+					ytm32_dma_cb_t cb, void *user_data,
+					bool ram_reload)
 {
 	dma_transfer_size_t xfer_size;
 	status_t status;
@@ -182,16 +183,12 @@ int ytm32_dma_hal_channel_config_loop(uint8_t ch, uint8_t trigsrc,
 		return status_to_errno(status);
 	}
 
-	/*
-	 * Loop transfer: each hardware request drains elements_per_req elements from
-	 * the fixed source (FIFO) to the linear destination buffer.  After
-	 * request_count requests the callback fires, and destLastAddrAdjust rewinds
-	 * dst back to the buffer start so a subsequent dma_start() refills from
-	 * scratch.
-	 */
 	uint32_t bytes_per_req = elements_per_req * (uint32_t)width;
 	uint32_t total_bytes = bytes_per_req * request_count;
-	dma_loop_transfer_config_t loop = {
+	static dma_loop_transfer_config_t loop_cfg[FEATURE_DMA_VIRTUAL_CHANNELS];
+	static uint8_t reload_cts_storage[FEATURE_DMA_VIRTUAL_CHANNELS][sizeof(dma_software_cts_t) + 31U];
+
+	loop_cfg[ch] = (dma_loop_transfer_config_t){
 		.triggerLoopIterationCount  = request_count,
 		.srcOffsetEnable            = false,
 		.dstOffsetEnable            = false,
@@ -202,23 +199,30 @@ int ytm32_dma_hal_channel_config_loop(uint8_t ch, uint8_t trigsrc,
 		.triggerLoopChnLinkNumber   = 0U,
 	};
 
+	dma_software_cts_t *reload_cts =
+		(dma_software_cts_t *)SCTS_ADDR(reload_cts_storage[ch]);
+
 	dma_transfer_config_t xfer = {
-		.srcAddr              = (uint32_t)src,
-		.destAddr             = (uint32_t)dst,
-		.srcTransferSize      = xfer_size,
-		.destTransferSize     = xfer_size,
-		.srcOffset            = 0,                   /* FIFO address fixed */
-		.destOffset           = (int16_t)width,      /* advance each element */
-		.srcLastAddrAdjust    = 0,
-		.destLastAddrAdjust   = -(int32_t)total_bytes,
-		.srcModulo            = DMA_MODULO_OFF,
-		.destModulo           = DMA_MODULO_OFF,
+		.srcAddr               = (uint32_t)src,
+		.destAddr              = (uint32_t)dst,
+		.srcTransferSize       = xfer_size,
+		.destTransferSize      = xfer_size,
+		.srcOffset             = 0,
+		.destOffset            = (int16_t)width,
+		.srcLastAddrAdjust     = 0,
+		.destLastAddrAdjust    = -(int32_t)total_bytes,
+		.srcModulo             = DMA_MODULO_OFF,
+		.destModulo            = DMA_MODULO_OFF,
 		.transferLoopByteCount = bytes_per_req,
-		.ramReloadEnable      = false,
-		.ramReloadNextDescAddr = 0U,
-		.interruptEnable      = true,
-		.loopTransferConfig   = &loop,
+		.ramReloadEnable       = ram_reload,
+		.ramReloadNextDescAddr = ram_reload ? (uint32_t)reload_cts : 0U,
+		.interruptEnable       = true,
+		.loopTransferConfig    = &loop_cfg[ch],
 	};
+
+	if (ram_reload) {
+		DMA_DRV_PushConfigToSCTS(&xfer, reload_cts);
+	}
 
 	status = DMA_DRV_ConfigLoopTransfer(ch, &xfer);
 	if (status != STATUS_SUCCESS) {
@@ -227,6 +231,26 @@ int ytm32_dma_hal_channel_config_loop(uint8_t ch, uint8_t trigsrc,
 	}
 
 	return 0;
+}
+
+int ytm32_dma_hal_channel_config_loop(uint8_t ch, uint8_t trigsrc,
+				      uintptr_t src, uintptr_t dst,
+				      uint8_t width, uint32_t elements_per_req,
+				      uint32_t request_count,
+				      ytm32_dma_cb_t cb, void *user_data)
+{
+	return config_loop_transfer(ch, trigsrc, src, dst, width, elements_per_req,
+				    request_count, cb, user_data, false);
+}
+
+int ytm32_dma_hal_channel_config_loop_reload(uint8_t ch, uint8_t trigsrc,
+					     uintptr_t src, uintptr_t dst,
+					     uint8_t width, uint32_t elements_per_req,
+					     uint32_t request_count,
+					     ytm32_dma_cb_t cb, void *user_data)
+{
+	return config_loop_transfer(ch, trigsrc, src, dst, width, elements_per_req,
+				    request_count, cb, user_data, true);
 }
 
 void ytm32_dma_hal_channel_release(uint8_t ch)

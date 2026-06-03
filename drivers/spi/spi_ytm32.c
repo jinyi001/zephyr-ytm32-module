@@ -20,6 +20,7 @@ LOG_MODULE_REGISTER(spi_ytm32);
 #include <zephyr/drivers/pinctrl.h>
 #include <zephyr/drivers/spi.h>
 #include <zephyr/drivers/spi/rtio.h>
+#include <zephyr/drivers/spi/spi_ytm32.h>
 #include <zephyr/kernel.h>
 #include <zephyr/sys/util.h>
 
@@ -75,6 +76,15 @@ struct spi_ytm32_data {
 	uint8_t dma_tx_chan;
 	uint8_t dma_rx_chan;
 #endif
+	/* ISR-safe async path (spi_ytm32_transceive_async).
+	 * When async_active is true the completion callback routes to async_cb
+	 * instead of giving done.  Set before ytm32_spi_hal_transfer() and
+	 * cleared by the ISR before invoking async_cb, so there is no race as
+	 * long as only one transfer (blocking OR async) is in-flight at a time.
+	 */
+	volatile bool         async_active;
+	spi_ytm32_async_cb_t  async_cb;
+	void                 *async_cb_data;
 };
 
 /*
@@ -93,6 +103,15 @@ static uint8_t dummy_rx[YTM32_SPI_DUMMY_LEN] __aligned(2);
 static void spi_ytm32_hal_cb(void *user_data, int status)
 {
 	struct spi_ytm32_data *data = user_data;
+
+	if (data->async_active) {
+		/* ISR-safe async path: route to caller's callback, not semaphore. */
+		data->async_active = false;
+		if (data->async_cb) {
+			data->async_cb(data->async_cb_data, status);
+		}
+		return;
+	}
 
 	data->hal_result = status;
 	k_sem_give(&data->done);
@@ -518,3 +537,31 @@ static DEVICE_API(spi, spi_ytm32_api) = {
 			      CONFIG_SPI_INIT_PRIORITY, &spi_ytm32_api);
 
 DT_INST_FOREACH_STATUS_OKAY(SPI_YTM32_INIT)
+
+/* ─────────────────────────── ISR-safe async path ─────────────────────────── */
+
+int spi_ytm32_transceive_async(const struct device *dev,
+			       const uint8_t *tx, uint8_t *rx, uint16_t len,
+			       spi_ytm32_async_cb_t cb, void *user_data)
+{
+	const struct spi_ytm32_config *cfg = dev->config;
+	struct spi_ytm32_data *data = dev->data;
+	int ret;
+
+	/*
+	 * Write callback fields before setting async_active so that if the
+	 * transfer completes before this function returns (theoretically
+	 * possible for very short transfers) the ISR already has valid pointers.
+	 */
+	data->async_cb      = cb;
+	data->async_cb_data = user_data;
+	data->async_active  = true;
+
+	ret = ytm32_spi_hal_transfer(cfg->instance, tx, rx, len);
+	if (ret < 0) {
+		/* HAL rejected — clear flag so the blocking path stays usable. */
+		data->async_active = false;
+	}
+
+	return ret;
+}
