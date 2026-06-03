@@ -59,18 +59,52 @@ struct pwm_ytm32_data {
 
 /* ── helpers ─────────────────────────────────────────────────────────── */
 
+/**
+ * counter_freq() - 计算 eTMR 计数器的实际工作频率
+ *
+ * @cfg:  驱动配置结构体指针
+ * @data: 驱动运行时数据结构体指针
+ *
+ * 将从 CGU 获取的功能时钟（clk_rate）右移 prescaler 位，等效于
+ * 除以 2^prescaler，得到计数器的滴答频率（Hz）。
+ *
+ * 返回值：计数器频率（Hz）。
+ */
 static inline uint32_t counter_freq(const struct pwm_ytm32_config *cfg,
 				    const struct pwm_ytm32_data *data)
 {
 	return data->clk_rate >> cfg->prescaler;
 }
 
+/**
+ * channel_is_comp() - 判断通道是否属于互补对
+ *
+ * @cfg: 驱动配置结构体指针
+ * @ch:  待查询的通道号（0–7）
+ *
+ * 将通道号取偶（ch & ~1U），查询 comp_mask 中对应的 bit。
+ * 奇数通道（互补输出侧）与其偶数对伴通道共享同一 bit，因此
+ * 奇/偶通道均可正确判断是否位于互补对中。
+ *
+ * 返回值：true 表示通道属于互补对，false 表示独立边沿对齐输出。
+ */
 static inline bool channel_is_comp(const struct pwm_ytm32_config *cfg, uint32_t ch)
 {
 	uint32_t even = ch & ~1U;
 	return (cfg->comp_mask & BIT(even)) != 0U;
 }
 
+/**
+ * ns_to_ticks() - 将死区时间（纳秒）转换为计数器滴答数
+ *
+ * @ns:      死区时间，单位纳秒
+ * @freq_hz: 计数器时钟频率（Hz），由 counter_freq() 获取
+ *
+ * 使用 64 位中间结果避免溢出：
+ *   ticks = ns × freq_hz / 1_000_000_000
+ *
+ * 返回值：对应的计数器滴答数，截断为 uint16_t。
+ */
 static inline uint16_t ns_to_ticks(uint32_t ns, uint32_t freq_hz)
 {
 	/* freq_hz ticks per second → ticks per ns = freq_hz / 1e9 */
@@ -79,6 +113,29 @@ static inline uint16_t ns_to_ticks(uint32_t ns, uint32_t freq_hz)
 
 /* ── Zephyr PWM API ──────────────────────────────────────────────────── */
 
+/**
+ * pwm_ytm32_set_cycles() - 设置指定通道的 PWM 周期与脉宽（Zephyr PWM API）
+ *
+ * @dev:           Zephyr PWM 设备指针
+ * @channel:       目标通道号（0–7）
+ * @period_cycles: PWM 周期，单位：计数器滴答
+ * @pulse_cycles:  高电平脉宽，单位：计数器滴答
+ * @flags:         PWM 标志位；支持 PWM_POLARITY_INVERTED（占空比反转）
+ *
+ * 行为说明：
+ *   1. 若 period_cycles 与上次不同，调用 eTMR_DRV_UpdatePwmPeriod 更新
+ *      MOD 寄存器；对中心对齐模式传入 period/2，因为计数器走 0→MOD→0
+ *      整个周期共 2×MOD 个滴答；
+ *   2. 将 pulse_cycles/period_cycles 转换为 Q15 格式占空比
+ *      （0x0000 = 0%，0x8000 = 100%）；
+ *   3. 若置 PWM_POLARITY_INVERTED，对占空比取反（eTMR_MAX_DUTY_CYCLE - duty）；
+ *   4. 调用 eTMR_DRV_UpdatePwmChannel 写入影子寄存器，再用
+ *      eTMR_DRV_SyncWithSoftTrigger 软件触发一次同步，确保原子生效。
+ *
+ * 奇数通道若属于互补对，则为只读侧，不可直接设置，应设其偶数对伴通道。
+ *
+ * 返回值：0 成功；-EINVAL 参数非法；-EIO SDK 调用失败。
+ */
 static int pwm_ytm32_set_cycles(const struct device *dev, uint32_t channel,
 				uint32_t period_cycles, uint32_t pulse_cycles,
 				pwm_flags_t flags)
@@ -142,6 +199,18 @@ static int pwm_ytm32_set_cycles(const struct device *dev, uint32_t channel,
 	return 0;
 }
 
+/**
+ * pwm_ytm32_get_cycles_per_sec() - 查询计数器时钟频率（Zephyr PWM API）
+ *
+ * @dev:     Zephyr PWM 设备指针
+ * @channel: 通道号（未使用，所有通道共用同一计数器）
+ * @cycles:  输出参数，写入计数器频率（Hz）
+ *
+ * 频率由 counter_freq() 计算，等于 clk_rate >> prescaler。
+ * 调用方可用此值将秒/毫秒换算为 period_cycles / pulse_cycles。
+ *
+ * 返回值：始终为 0。
+ */
 static int pwm_ytm32_get_cycles_per_sec(const struct device *dev,
 					uint32_t channel, uint64_t *cycles)
 {
@@ -155,6 +224,17 @@ static int pwm_ytm32_get_cycles_per_sec(const struct device *dev,
 
 /* ── overflow ISR (shared handler, per-instance wrapper below) ───────── */
 
+/**
+ * pwm_ytm32_handle_ovf() - eTMR 计数器溢出（TOF）中断公共处理函数
+ *
+ * @dev: Zephyr PWM 设备指针
+ *
+ * 由各实例专属 ISR（pwm_ytm32_ovf_isr_<inst>）调用。完成两件事：
+ *   1. 清除 STS.TOF（位 13）标志——必须写 eTMR_STS_TOF_MASK（0x2000）；
+ *      注意：eTMR_TIME_OVER_FLOW_FLAG 枚举值（0x1000）对应不同的位，
+ *      若误用将无法清除 TOF，导致 IRQ 风暴（曾触发过此 bug）；
+ *   2. 若已注册 ovf_cb，调用用户回调（通常在此更新 FOC 三相占空比）。
+ */
 static void pwm_ytm32_handle_ovf(const struct device *dev)
 {
 	const struct pwm_ytm32_config *cfg = dev->config;
@@ -173,6 +253,19 @@ static void pwm_ytm32_handle_ovf(const struct device *dev)
 	}
 }
 
+/**
+ * pwm_ytm32_register_ovf_cb() - 注册 PWM 溢出（周期）回调
+ *
+ * @dev:       Zephyr PWM 设备指针
+ * @cb:        回调函数指针；传 NULL 可注销回调
+ * @user_data: 透传给回调的用户指针
+ *
+ * 以关中断方式原子更新 ovf_cb / ovf_user_data，确保 ISR 侧不会看到
+ * 半更新状态。回调在溢出 ISR 上下文中执行，须满足 ISR 安全约束
+ * （不得睡眠，不得使用非 ISR 安全的 API）。
+ *
+ * 返回值：始终为 0。
+ */
 int pwm_ytm32_register_ovf_cb(const struct device *dev,
 			       pwm_ytm32_ovf_cb_t cb, void *user_data)
 {
@@ -185,11 +278,22 @@ int pwm_ytm32_register_ovf_cb(const struct device *dev,
 	return 0;
 }
 
-/*
- * ISR-safe 3-phase duty update for FOC.  Only valid when the device is
- * configured with complementary pairs on channels 0/1, 2/3, 4/5
- * (comp_mask = 0x15).  Call exclusively from within the OVF callback.
- * duty_*_q15 in [0, eTMR_MAX_DUTY_CYCLE].
+/**
+ * pwm_ytm32_update_3phase_isr() - ISR 上下文中原子更新三相 PWM 占空比
+ *
+ * @dev:    Zephyr PWM 设备指针
+ * @da_q15: A 相占空比，Q15 格式（0x0000 = 0%，0x8000 = 100%）
+ * @db_q15: B 相占空比，Q15 格式
+ * @dc_q15: C 相占空比，Q15 格式
+ *
+ * 仅适用于以下配置：通道 0/1、2/3、4/5 均为互补对
+ * （comp_mask = 0x15，即 DT ytmicro,complementary-channels-mask = <0x15>）。
+ * 必须在 OVF 回调中调用，此时计数器处于 INIT 事件附近，死区插入
+ * 和占空比更新均在下一个 PWM 周期生效，满足电机驱动同步要求。
+ *
+ * 流程：
+ *   1. 依次写三对通道（ch0/ch2/ch4）的影子占空比寄存器；
+ *   2. 软件触发一次 Sync，将三相变化原子提交到活动寄存器。
  */
 void pwm_ytm32_update_3phase_isr(const struct device *dev,
 				  uint16_t da_q15, uint16_t db_q15,
@@ -206,6 +310,30 @@ void pwm_ytm32_update_3phase_isr(const struct device *dev,
 
 /* ── init ────────────────────────────────────────────────────────────── */
 
+/**
+ * pwm_ytm32_init() - eTMR PWM 驱动初始化
+ *
+ * @dev: Zephyr PWM 设备指针
+ *
+ * 在 POST_KERNEL 阶段由 Zephyr 设备模型调用（通过实例专属包装函数
+ * pwm_ytm32_init_<inst>）。执行步骤：
+ *   1. 使能功能时钟，获取时钟频率写入 data->clk_rate；
+ *   2. 应用 pinctrl 默认状态，复用 eTMR 引脚；
+ *   3. 调用 eTMR_DRV_Init：配置计数器时钟源、预分频、调试模式；
+ *      etmrPrescaler 传 2^prescaler（而非 DT 原始位移值），否则 SDK
+ *      会写入 CLKPRS = 0x7F（÷128）而非期望的分频比；
+ *   4. 调用 eTMR_DRV_InitPwm：配置 4 对通道，互补对使用中心对齐、
+ *      插入死区；频率参数对中心对齐模式×2，以补偿 SDK 的 MOD 计算
+ *      （MOD = clk/freq - 1，实际周期 = 2×MOD 滴答）；
+ *   5. 若 adc_sync_trigger = true，调用 eTMR_DRV_SetOutputTrigger，
+ *      在 INIT-match 事件输出触发脉冲，经 TMU 路由到 ADC 硬件触发；
+ *      注意：必须在 eTMR_DRV_InitPwm 之后配置，否则会被 InitPwm 覆盖；
+ *   6. 若 autostart = true，调用 eTMR_DRV_Enable 启动计数器；
+ *   7. 初始化 data->lock 互斥锁。
+ *
+ * 返回值：0 成功；-ENODEV 时钟设备未就绪；-EIO SDK 调用失败；
+ *         其他负值来自 clock_control / pinctrl。
+ */
 static int pwm_ytm32_init(const struct device *dev)
 {
 	const struct pwm_ytm32_config *cfg = dev->config;
@@ -369,9 +497,15 @@ static const struct pwm_driver_api pwm_ytm32_driver_api = {
 
 /* ── per-instance device instantiation ──────────────────────────────── */
 
-/*
- * Each eTMR instance needs its own overflow ISR function because
- * IRQ_CONNECT requires a compile-time constant handler address.
+/**
+ * ETMR_OVF_ISR_DEFINE(inst) - 为实例 inst 定义专属的溢出 ISR 包装函数
+ *
+ * @inst: DT 实例编号（0、1、…），由 DT_INST_FOREACH_STATUS_OKAY 展开
+ *
+ * IRQ_CONNECT 要求处理函数地址在编译期确定，故每个实例必须有独立的
+ * ISR 符号 pwm_ytm32_ovf_isr_<inst>。该包装函数忽略传入的 dev 参数，
+ * 直接通过 DEVICE_DT_INST_GET(inst) 获取正确的设备指针，再调用
+ * pwm_ytm32_handle_ovf() 完成实际处理。
  */
 #define ETMR_OVF_ISR_DEFINE(inst)					\
 	static void pwm_ytm32_ovf_isr_##inst(const struct device *dev)	\
@@ -380,6 +514,15 @@ static const struct pwm_driver_api pwm_ytm32_driver_api = {
 		pwm_ytm32_handle_ovf(DEVICE_DT_INST_GET(inst));		\
 	}
 
+/**
+ * ETMR_IRQ_INIT(inst) - 连接并使能实例 inst 的溢出中断
+ *
+ * @inst: DT 实例编号
+ *
+ * 在实例专属的 pwm_ytm32_init_<inst>() 中展开（而非 pwm_ytm32_init()
+ * 内部），以便 IRQ_CONNECT 宏在编译期绑定正确的 ISR 符号和 IRQ 号。
+ * 中断向量号和优先级从 DTS "ovf" 具名 IRQ 单元读取。
+ */
 #define ETMR_IRQ_INIT(inst)						\
 	do {								\
 		IRQ_CONNECT(DT_INST_IRQ_BY_NAME(inst, ovf, irq),	\
@@ -389,6 +532,22 @@ static const struct pwm_driver_api pwm_ytm32_driver_api = {
 		irq_enable(DT_INST_IRQ_BY_NAME(inst, ovf, irq));	\
 	} while (false)
 
+/**
+ * ETMR_PWM_DEVICE_INIT(inst) - 展开单个 eTMR PWM 实例的全部注册代码
+ *
+ * @inst: DT 实例编号，由 DT_INST_FOREACH_STATUS_OKAY 遍历展开
+ *
+ * 依次完成：
+ *   1. PINCTRL_DT_INST_DEFINE：声明 pinctrl 配置对象；
+ *   2. ETMR_OVF_ISR_DEFINE：生成实例专属 ISR 函数；
+ *   3. 定义 pwm_ytm32_config_<inst>：从 DTS 属性填充所有配置字段；
+ *   4. 定义 pwm_ytm32_data_<inst>：运行时数据（零初始化）；
+ *   5. 定义 pwm_ytm32_init_<inst>：先调用 ETMR_IRQ_INIT 连接中断，
+ *      再调用 pwm_ytm32_init() 完成其余初始化；
+ *   6. DEVICE_DT_INST_DEFINE：向 Zephyr 设备模型注册设备，
+ *      初始化优先级为 CONFIG_PWM_INIT_PRIORITY，
+ *      API 表为 pwm_ytm32_driver_api。
+ */
 #define ETMR_PWM_DEVICE_INIT(inst)					\
 									\
 	PINCTRL_DT_INST_DEFINE(inst);					\
