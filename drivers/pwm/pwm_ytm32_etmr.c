@@ -15,9 +15,11 @@
 #include <zephyr/irq.h>
 
 #include "etmr_pwm_driver.h"
+#include "etmr_oc_driver.h"
 #include "etmr_common.h"
 
 #include <zephyr/drivers/pwm/pwm_ytm32_etmr.h>
+#include <zephyr/dt-bindings/clock/ytmicro,ytm32-soc-clock.h>
 
 LOG_MODULE_REGISTER(pwm_ytm32_etmr, CONFIG_PWM_LOG_LEVEL);
 
@@ -46,11 +48,13 @@ struct pwm_ytm32_config {
 	uint32_t adc_trigger_width;
 	/* Start the eTMR counter at driver init (DT ytmicro,autostart) */
 	bool autostart;
+	/* OC channel for mid-period ADC trigger (UINT8_MAX = disabled) */
+	uint8_t adc_mid_trig_channel;
 };
 
 struct pwm_ytm32_data {
 	struct k_mutex lock;
-	uint32_t clk_rate;   /* functional clock rate after CGU, before eTMR prescaler */
+	uint32_t clk_rate;   /* counter clock Hz = functional_clk >> effective_prescaler */
 	uint32_t period_cycles; /* last period passed to set_cycles, in counter ticks */
 	etmr_state_t etmr_state;
 	pwm_ytm32_ovf_cb_t ovf_cb;
@@ -70,10 +74,15 @@ struct pwm_ytm32_data {
  *
  * 返回值：计数器频率（Hz）。
  */
+/* Returns counter clock Hz.  data->clk_rate stores the already-divided
+ * counter frequency (functional clock >> effective prescaler), so this is
+ * a direct read.  The value is set in pwm_ytm32_init after auto-prescaler
+ * adjustment. */
 static inline uint32_t counter_freq(const struct pwm_ytm32_config *cfg,
 				    const struct pwm_ytm32_data *data)
 {
-	return data->clk_rate >> cfg->prescaler;
+	ARG_UNUSED(cfg);
+	return data->clk_rate;
 }
 
 /**
@@ -150,6 +159,11 @@ static int pwm_ytm32_set_cycles(const struct device *dev, uint32_t channel,
 		return -EINVAL;
 	}
 
+	/* mid-trig channel is managed internally; not exposed to callers */
+	if (channel == cfg->adc_mid_trig_channel) {
+		return -ENOTSUP;
+	}
+
 	/* Odd channel that is the comp output of a pair is read-only from HW */
 	if ((channel & 1U) && center) {
 		LOG_WRN("ch%u is a complementary output; set ch%u instead",
@@ -165,11 +179,11 @@ static int pwm_ytm32_set_cycles(const struct device *dev, uint32_t channel,
 
 	if (period_cycles != data->period_cycles) {
 		/*
-		 * For center-aligned PWM the counter counts 0→MOD→0, so the
-		 * full period = 2×MOD.  Pass period/2 as the "period ticks"
-		 * so the SDK sets MOD = period/2 - 1.
+		 * eTMR is a pure up-only counter.  Period = MOD+1 ticks
+		 * regardless of edge-aligned or center-aligned mode.
+		 * Center-aligned is achieved via symmetric VAL0/VAL1.
 		 */
-		sdk_period = center ? (period_cycles / 2U) : period_cycles;
+		sdk_period = period_cycles;
 		status_t s = eTMR_DRV_UpdatePwmPeriod(cfg->instance,
 						       eTMR_PWM_PERIOD_IN_TICKS,
 						       sdk_period);
@@ -179,6 +193,20 @@ static int pwm_ytm32_set_cycles(const struct device *dev, uint32_t channel,
 			return -EIO;
 		}
 		data->period_cycles = period_cycles;
+
+		/* Keep OC mid-trig VAL0 in sync with new MOD */
+		if (cfg->adc_mid_trig_channel < ETMR_CH_COUNT) {
+			uint16_t new_mod = (uint16_t)data->etmr_state.etmrModValue;
+
+			eTMR_DRV_UpdateOutputCompareChannel(
+				cfg->instance,
+				cfg->adc_mid_trig_channel,
+				(uint16_t)(new_mod / 2U),
+				new_mod,
+				eTMR_OUTPUT_CLR,
+				eTMR_OUTPUT_CLR,
+				false);
+		}
 	}
 
 	/* Q15 duty cycle: 0x0000 = 0 %, 0x8000 = 100 % */
@@ -323,8 +351,8 @@ void pwm_ytm32_update_3phase_isr(const struct device *dev,
  *      etmrPrescaler 传 2^prescaler（而非 DT 原始位移值），否则 SDK
  *      会写入 CLKPRS = 0x7F（÷128）而非期望的分频比；
  *   4. 调用 eTMR_DRV_InitPwm：配置 4 对通道，互补对使用中心对齐、
- *      插入死区；频率参数对中心对齐模式×2，以补偿 SDK 的 MOD 计算
- *      （MOD = clk/freq - 1，实际周期 = 2×MOD 滴答）；
+ *      插入死区；频率参数直接传 DT 的 pwm-frequency-hz（eTMR 是纯
+ *      单向上升计数器，不需×2补偿；中心对齐靠对称 VAL0/VAL1 实现）；
  *   5. 若 adc_sync_trigger = true，调用 eTMR_DRV_SetOutputTrigger，
  *      在 INIT-match 事件输出触发脉冲，经 TMU 路由到 ADC 硬件触发；
  *      注意：必须在 eTMR_DRV_InitPwm 之后配置，否则会被 InitPwm 覆盖；
@@ -334,6 +362,56 @@ void pwm_ytm32_update_3phase_isr(const struct device *dev,
  * 返回值：0 成功；-ENODEV 时钟设备未就绪；-EIO SDK 调用失败；
  *         其他负值来自 clock_control / pinctrl。
  */
+/*
+ * Read the SCU hardware registers to compute the actual FAST_BUS_CLK.
+ * The CGU HAL / clock_control_get_rate may return incorrect values
+ * for the fast bus clock.  This helper reads the real state directly.
+ *
+ * IMPORTANT: Use SCU->STS CLKST bits [1:0] (actual clock source status),
+ * NOT SCU->CLKS (configuration).  If the clock switch timed out, CLKS
+ * may show FXOSC while the hardware is still running from FIRC.
+ *
+ * SCU->STS  bits [1:0] = CLKST (actual system clock source)
+ *   00=FIRC, 01=PLL, 10=FXOSC, 11=SIRC
+ * SCU->DIV  bits [11:8] = FBDIVS (fast bus divider - 1)
+ */
+#define SCU_BASE_ADDR   0x4007C000U
+#define SCU_STS_REG     (*(volatile uint32_t *)(SCU_BASE_ADDR + 0x08))
+#define SCU_DIV_REG     (*(volatile uint32_t *)(SCU_BASE_ADDR + 0x04))
+
+static uint32_t etmr_get_fast_bus_clk(void)
+{
+	uint32_t clkst = SCU_STS_REG & 0x3U;
+	uint32_t sys_clk;
+
+	switch (clkst) {
+	case 0U: /* FIRC */
+		sys_clk = YTM32_FIRC_HZ;
+		break;
+	case 1U: /* PLL — read actual Fout from PLL_CTRL */
+	{
+		uint32_t pll_ctrl = *(volatile uint32_t *)(SCU_BASE_ADDR + 0x20);
+		uint32_t ref_clk = (pll_ctrl & (1U << 4)) ? YTM32_FIRC_HZ
+				   : (uint32_t)DT_PROP(DT_NODELABEL(cgu),
+						       fxosc_frequency);
+		uint32_t fbdiv = ((pll_ctrl >> 16) & 0x3FU) + 1U;
+		uint32_t refdiv = ((pll_ctrl >> 8) & 0xFU) + 1U;
+		sys_clk = (ref_clk * fbdiv) / (2U * refdiv);
+		break;
+	}
+	case 2U: /* FXOSC — use DTS value */
+		sys_clk = DT_PROP(DT_NODELABEL(cgu), fxosc_frequency);
+		break;
+	default: /* SIRC */
+		sys_clk = YTM32_SIRC_HZ;
+		break;
+	}
+
+	uint32_t fb_divs = (SCU_DIV_REG >> 8) & 0xFU;
+
+	return sys_clk / (fb_divs + 1U);
+}
+
 static int pwm_ytm32_init(const struct device *dev)
 {
 	const struct pwm_ytm32_config *cfg = dev->config;
@@ -352,12 +430,12 @@ static int pwm_ytm32_init(const struct device *dev)
 		return ret;
 	}
 
-	ret = clock_control_get_rate(cfg->clk_dev, cfg->clk_sys, &clk_rate);
-	if (ret < 0) {
-		LOG_ERR("clock_control_get_rate failed (%d)", ret);
-		return ret;
-	}
-	data->clk_rate = clk_rate;
+	/*
+	 * The eTMR counter runs from FAST_BUS_CLK, not from the module
+	 * gate clock.  Read the actual fast bus rate from SCU registers.
+	 */
+	clk_rate = etmr_get_fast_bus_clk();
+	LOG_INF("eTMR%u: FAST_BUS_CLK=%u Hz", cfg->instance, clk_rate);
 
 	ret = pinctrl_apply_state(cfg->pincfg, PINCTRL_STATE_DEFAULT);
 	if (ret < 0) {
@@ -372,7 +450,30 @@ static int pwm_ytm32_init(const struct device *dev)
 	 * power-of-two shift (0→÷1, 1→÷2, …, matching counter_freq()'s
 	 * `clk >> prescaler`), so pass 2^prescaler as the divide count.
 	 * Passing the raw shift would underflow to CLKPRS=0x7F (÷128).
+	 *
+	 * Auto-prescaler: if the requested frequency would require MOD > 0xFFFF
+	 * at the DT prescaler, increment until MOD fits in 16 bits.
 	 */
+	/* No freq×2 for center-aligned: eTMR is a pure up-only counter
+	 * (DS §26.4.2).  Center-aligned PWM is achieved via symmetric
+	 * VAL0/VAL1 placement, NOT via up-down counting.  TOF fires once
+	 * per period at MOD→INIT, same as edge-aligned. */
+	uint32_t sdk_freq_pre = cfg->pwm_freq_hz;
+	uint8_t prescaler = cfg->prescaler;
+
+	while (prescaler < 7U &&
+	       (clk_rate >> prescaler) / sdk_freq_pre > 0xFFFFU) {
+		prescaler++;
+	}
+	if (prescaler != cfg->prescaler) {
+		LOG_WRN("eTMR%u: prescaler auto-adjusted %u→%u for %u Hz",
+			cfg->instance, cfg->prescaler, prescaler,
+			cfg->pwm_freq_hz);
+	}
+	/* Store counter frequency (after prescaler) so counter_freq() is
+	 * always correct regardless of whether auto-adjustment fired. */
+	data->clk_rate = clk_rate >> prescaler;
+
 	etmr_trig_config_t trig_cfg = {
 		.trigSrc                = TRIGGER_FROM_MATCHING_EVENT,
 		.pwmOutputChannel       = 0U,
@@ -387,7 +488,7 @@ static int pwm_ytm32_init(const struct device *dev)
 
 	etmr_user_config_t user_cfg = {
 		.etmrClockSource = eTMR_CLOCK_SOURCE_INTERNALCLK,
-		.etmrPrescaler   = (uint8_t)BIT(cfg->prescaler),
+		.etmrPrescaler   = (uint8_t)BIT(prescaler),
 		.debugMode       = false,
 		.syncMethod      = NULL,
 		.outputTrigConfig = NULL,
@@ -400,7 +501,14 @@ static int pwm_ytm32_init(const struct device *dev)
 		return -EIO;
 	}
 
-	/* 2. Build per-channel configs for all four even/odd pairs */
+	/* Patch the SDK's cached clock frequency with the value from
+	 * etmr_get_fast_bus_clk() (reads SCU_STS, not SCU_CLKS config).
+	 * Needed because eTMR_DRV_InitPwm uses etmrSourceClockFrequency
+	 * to compute MOD, and HAL state may lag if a clock switch timed out.
+	 */
+	data->etmr_state.etmrSourceClockFrequency = data->clk_rate;
+
+	/* 2. Build per-channel configs for all four even-odd pairs */
 	uint16_t dt_ticks = ns_to_ticks(cfg->deadtime_ns,
 					counter_freq(cfg, data));
 	etmr_pwm_ch_param_t ch_cfgs[ETMR_PAIR_COUNT];
@@ -428,13 +536,12 @@ static int pwm_ytm32_init(const struct device *dev)
 	}
 
 	/*
-	 * 3. For center-aligned mode the SDK computes MOD = clk/freq - 1.
-	 *    For center-aligned the actual output period = 2×MOD ticks, so
-	 *    pass 2×pwm_freq_hz so MOD ends up at clk/(2×freq), giving the
-	 *    correct switching frequency.
+	 * 3. Pass the actual PWM frequency to the SDK.
+	 *    eTMR is up-only: MOD = clk/freq - 1, period = (MOD+1) ticks.
+	 *    Center-aligned PWM uses symmetric VAL0/VAL1, NOT up-down counting.
+	 *    Do NOT double the frequency for center-aligned mode.
 	 */
-	bool any_center = (cfg->comp_mask != 0U);
-	uint32_t sdk_freq = any_center ? cfg->pwm_freq_hz * 2U : cfg->pwm_freq_hz;
+	uint32_t sdk_freq = cfg->pwm_freq_hz;
 
 	etmr_pwm_param_t pwm_param = {
 		.nNumPwmChannels        = ETMR_PAIR_COUNT,
@@ -471,7 +578,45 @@ static int pwm_ytm32_init(const struct device *dev)
 	data->period_cycles = counter_freq(cfg, data) / cfg->pwm_freq_hz;
 
 	/*
-	 * 5. Optionally start the counter.  eTMR_DRV_Init/InitPwm only configure
+	 * 5. Optional mid-period ADC trigger via OC channel.
+	 *    InitOutputCompare is called AFTER InitPwm so that etmrModValue is
+	 *    already computed.  maxCountValue is set to the same etmrModValue,
+	 *    making the MOD write idempotent.  eTMR_Disable inside
+	 *    InitOutputCompare is harmless here because Enable hasn't been called
+	 *    yet (autostart happens below).
+	 */
+	if (cfg->adc_mid_trig_channel < ETMR_CH_COUNT) {
+		uint16_t mod = (uint16_t)data->etmr_state.etmrModValue;
+		etmr_oc_ch_param_t oc_ch = {
+			.hwChannelId            = cfg->adc_mid_trig_channel,
+			.channelInitVal         = 0U,
+			.val0CmpMode            = eTMR_OUTPUT_CLR,
+			.val1CmpMode            = eTMR_OUTPUT_CLR,
+			.cmpVal0                = (uint16_t)(mod / 2U),
+			.cmpVal1                = mod,
+			.enableExternalTrigger0 = true,
+			.enableExternalTrigger1 = false,
+			.interruptEnable        = false,
+		};
+		etmr_oc_param_t oc_param = {
+			.maxCountValue           = mod,
+			.nNumOutputChannels      = 1U,
+			.counterInitValFromInitReg = true,
+			.cntVal                  = 0U,
+			.outputChannelConfig     = &oc_ch,
+		};
+		s = eTMR_DRV_InitOutputCompare(cfg->instance, &oc_param);
+		if (s != STATUS_SUCCESS) {
+			LOG_ERR("eTMR_DRV_InitOutputCompare failed (%d)", s);
+			return -EIO;
+		}
+		LOG_DBG("eTMR%u CH%u OC mid-trig: VAL0=%u (MOD=%u)",
+			cfg->instance, cfg->adc_mid_trig_channel,
+			(unsigned)(mod / 2U), (unsigned)mod);
+	}
+
+	/*
+	 * 6. Optionally start the counter.  eTMR_DRV_Init/InitPwm only configure
 	 *    the module; the counter does not run until CTRL.EN is set.
 	 *    Only start if ytmicro,autostart is set in DTS — this prevents
 	 *    unintended PWM output on non-motor applications at boot.
@@ -482,8 +627,8 @@ static int pwm_ytm32_init(const struct device *dev)
 
 	k_mutex_init(&data->lock);
 
-	LOG_DBG("eTMR%u ready: clk=%u Hz prescaler=%u init_freq=%u Hz",
-		cfg->instance, clk_rate, cfg->prescaler, cfg->pwm_freq_hz);
+	LOG_DBG("eTMR%u ready: counter_clk=%u Hz prescaler=%u init_freq=%u Hz",
+		cfg->instance, data->clk_rate, prescaler, cfg->pwm_freq_hz);
 
 	return 0;
 }
@@ -550,6 +695,13 @@ static const struct pwm_driver_api pwm_ytm32_driver_api = {
  */
 #define ETMR_PWM_DEVICE_INIT(inst)					\
 									\
+	BUILD_ASSERT(							\
+		!(DT_INST_PROP(inst, ytmicro_adc_sync_trigger) &&	\
+		  DT_INST_NODE_HAS_PROP(inst,				\
+			ytmicro_adc_mid_trig_channel)),			\
+		"ytmicro,adc-sync-trigger and "			\
+		"ytmicro,adc-mid-trig-channel are mutually exclusive");\
+									\
 	PINCTRL_DT_INST_DEFINE(inst);					\
 									\
 	ETMR_OVF_ISR_DEFINE(inst)					\
@@ -572,6 +724,8 @@ static const struct pwm_driver_api pwm_ytm32_driver_api = {
 		.adc_trigger_width = DT_INST_PROP_OR(inst,		\
 				ytmicro_adc_trigger_width, 16U),	\
 		.autostart = DT_INST_PROP(inst, ytmicro_autostart),	\
+		.adc_mid_trig_channel = DT_INST_PROP_OR(inst,		\
+				ytmicro_adc_mid_trig_channel, UINT8_MAX),\
 	};								\
 									\
 	static struct pwm_ytm32_data pwm_ytm32_data_##inst;		\

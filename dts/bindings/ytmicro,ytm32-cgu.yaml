@@ -8,25 +8,52 @@ properties:
   "#clock-cells":
     const: 1
 
+  firc-frequency:
+    type: int
+    required: false
+    description: |
+      Fast Internal RC Oscillator frequency in Hz.
+      This is a hardware-fixed value set in the SoC DTSI — do not override
+      in board DTS.  The driver uses BUILD_ASSERT to cross-check this against
+      the YTM32_FIRC_HZ constant in the SoC clock header.
+        YTM32B1MD1: 96 000 000 (RM §12.1 / FEATURE_SCU_FIRC_FREQ)
+        YTM32B1MC0: 80 000 000
+
+  sirc-frequency:
+    type: int
+    required: false
+    description: |
+      Slow Internal RC Oscillator frequency in Hz.
+      Hardware-fixed; set in the SoC DTSI, do not override in board DTS.
+        YTM32B1MD1 / MC0: 12 000 000 (RM §12.1 / FEATURE_SCU_SIRC_FREQ)
+
   system-clock-source:
     type: int
     required: false
     default: 0
     description: |
-      System clock source selector. Use YTM32_SYSTEM_CLOCK_SRC_* values from
-      the active SoC clock binding.
+      System clock source selector.  Use YTM32_SYSTEM_CLOCK_SRC_* values.
+        0 = FIRC   (default after reset)
+        1 = FXOSC  (requires fxosc-frequency in board DTS)
+        2 = PLL    (requires pll configuration, not yet supported)
 
   fxosc-frequency:
     type: int
     required: false
     description: |
-      External fast oscillator frequency in Hz. Required when
-      system-clock-source selects FXOSC or PLL sourced from FXOSC.
+      External fast oscillator (crystal) frequency in Hz.
+      Required when system-clock-source is FXOSC or PLL sourced from FXOSC.
+      Valid range per RM §12.1: 4 000 000 – 40 000 000 Hz.
+      The driver enforces this range with BUILD_ASSERT at compile time.
+      Set this in the board DTS to match the actual crystal (e.g. X2 on the
+      Xiaomi CyberGear board is 16 MHz).
 
   fxosc-bypass:
     type: boolean
     description: |
-      Enable FXOSC bypass mode for an externally driven clock input.
+      Enable FXOSC bypass mode for an externally driven clock input (no
+      crystal resonator).  When set, fxosc-frequency must equal the
+      external clock source frequency.
 
   fxosc-gain-selection:
     type: int
@@ -39,15 +66,18 @@ properties:
     type: int
     required: true
     description: |
-      Target core clock frequency in Hz.
-      Example: 120000000
+      Core (CPU / SysTick) clock frequency in Hz after all dividers.
+      Derived value: core-clock = <source-freq> / core-divider.
+      A BUILD_ASSERT in the clock driver checks this identity at compile
+      time to catch copy-paste errors.  CONFIG_SYS_CLOCK_HW_CYCLES_PER_SEC
+      is auto-derived from this property via Kconfig dt_node_int_prop_int.
 
   core-divider:
     type: int
     required: true
     description: |
-      Divider for the core clock relative to the system oscillator/PLL.
-      Valid values depend on the specific SoC (e.g., 1, 2, 4...).
+      Integer divider applied to the selected system clock source to produce
+      the core clock.  Hardware-supported range: 1–16 (SCU FBDIVS register).
 
   fast-bus-divider:
     type: int

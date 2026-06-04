@@ -63,9 +63,10 @@
 #define YTM32_CLOCK_SRC_LPO              4U
 #define YTM32_CLOCK_SRC_FAST_BUS         7U
 
-/* Fixed oscillator frequencies (Hz) */
-#define YTM32_FIRC_HZ                    80000000U
-#define YTM32_FXOSC_HZ                   24000000U
+/* Fixed oscillator frequencies (Hz) — matches DTS firc/sirc-frequency in ytm32b1mc0.dtsi */
+#define YTM32_FIRC_HZ                    80000000U  /* RM §12.1 FEATURE_SCU_FIRC_FREQ  */
+#define YTM32_SIRC_HZ                    12000000U  /* RM §12.1 FEATURE_SCU_SIRC_FREQ  */
+#define YTM32_FXOSC_HZ                   24000000U  /* SDK EVB default; board sets own  */
 
 #define YTM32_SYSTEM_CLOCK_SRC_FIRC      0U
 #define YTM32_SYSTEM_CLOCK_SRC_FXOSC     1U

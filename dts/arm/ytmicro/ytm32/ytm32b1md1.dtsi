@@ -27,9 +27,13 @@
 	cgu: cgu {
 		compatible = "ytmicro,ytm32-cgu";
 		#clock-cells = <1>;
+		/* Hardware-fixed oscillator frequencies (RM §12.1): */
+		firc-frequency = <96000000>;   /* FIRC: fixed 96 MHz */
+		sirc-frequency = <12000000>;   /* SIRC: fixed 12 MHz */
+		/* Board-selectable clock configuration defaults: */
 		system-clock-source = <YTM32_SYSTEM_CLOCK_SRC_FXOSC>;
-		fxosc-frequency = <16000000>;
-		core-clock = <16000000>;
+		fxosc-frequency = <16000000>;  /* override in board DTS for actual crystal */
+		core-clock = <16000000>;       /* = fxosc-frequency / core-divider */
 		core-divider = <1>;
 		fast-bus-divider = <1>;
 		slow-bus-divider = <2>;
@@ -165,8 +169,14 @@
 			reg = <0x40040000 0x58>;
 			interrupts = <39 0>;
 			clocks = <&cgu YTM32_CLOCK_ADC0>;
-			ytmicro,functional-clock-source = <YTM32_CLOCK_SRC_FXOSC>;
-			ytmicro,functional-clock-divider = <3>;
+			/* IPC clock: FIRC (96 MHz) / 6 = 16 MHz (crystal-independent).
+			 * ADC internal divider (ytmicro,adc-clock-divider = 2 by default):
+			 *   CFG1.PRS = 2 → divide by 4 → ADC core = 4 MHz.
+			 * RM §30.1: ADC clock valid range 2–32 MHz.
+			 */
+			ytmicro,functional-clock-source = <YTM32_CLOCK_SRC_FIRC>;
+			ytmicro,functional-clock-divider = <6>;
+			/* ytmicro,adc-clock-divider = <2> is the binding default (÷4). */
 			#io-channel-cells = <1>;
 			status = "disabled";
 			/* DMA channel, hw-trigger-source, tmu, and cim-trigger-select

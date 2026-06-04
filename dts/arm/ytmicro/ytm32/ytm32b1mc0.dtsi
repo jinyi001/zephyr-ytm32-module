@@ -26,6 +26,9 @@
 	cgu: cgu {
 		compatible = "ytmicro,ytm32-cgu";
 		#clock-cells = <1>;
+		/* Hardware-fixed oscillator frequencies (RM §12.1): */
+		firc-frequency = <80000000>;   /* FIRC: fixed 80 MHz */
+		sirc-frequency = <12000000>;   /* SIRC: fixed 12 MHz */
 		status = "okay";
 	};
 

@@ -96,6 +96,19 @@ properties:
       functional clock. Default 16 cycles is empirically verified at 48 MHz
       eTMR / 4 MHz ADC (FXOSC ÷4).
 
+  ytmicro,adc-mid-trig-channel:
+    type: int
+    required: false
+    description: |
+      eTMR channel (not used for PWM output) to configure as a mid-period
+      ADC trigger.  The driver sets this channel to Output Compare mode with
+      VAL0 = MOD/2 and VAL0TEN = 1, so it emits eTMR_EXT_TRIG at the counter
+      mid-point every PWM period.  The ADC node must set
+      ytmicro,hw-trigger-source to YTM32_TMU_SRC_ETMRn_EXT_TRIG accordingly.
+      Mutually exclusive with ytmicro,adc-sync-trigger.
+      Use a channel not occupied by PWM pairs (e.g. 6 when CH0-CH5 are used
+      for three-phase complementary output).
+
   ytmicro,autostart:
     type: boolean
     description: |

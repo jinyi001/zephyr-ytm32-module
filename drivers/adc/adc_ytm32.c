@@ -87,7 +87,7 @@ struct adc_ytm32_config {
 	uint8_t                          instance;
 	const struct device             *clock_dev;
 	clock_control_subsys_t           clock_subsys;
-	uint32_t                         clk_div;
+	uint32_t                         adc_clk_div; /* CFG1.PRS — ADC internal divider */
 	const struct pinctrl_dev_config *pincfg;
 	void (*irq_config_func)(void);
 	/* Phase 2: DMA and hardware trigger (optional) */
@@ -276,8 +276,15 @@ static void adc_context_start_sampling(struct adc_context *ctx)
 					    data->sample_time, &max_smp);
 
 	data->channel_count = slot;
-	data->buffer = (uint16_t *)ctx->sequence.buffer
-		       + (size_t)ctx->sampling_index * slot;
+	/* sampling_index is only reset by adc_context_start_read when
+	 * sequence->options != NULL.  For no-options (single) reads it retains
+	 * its value from the previous extra_samplings call, so using it as an
+	 * offset would write past the caller's single-element buffer.  Always
+	 * use index 0 when there are no options; the framework never increments
+	 * sampling_index in that code path anyway.
+	 */
+	uint16_t idx = ctx->sequence.options ? ctx->sampling_index : 0U;
+	data->buffer = (uint16_t *)ctx->sequence.buffer + (size_t)idx * slot;
 
 	conv.sequenceConfig.totalChannels     = slot;
 	/*
@@ -290,7 +297,12 @@ static void adc_context_start_sampling(struct adc_context *ctx)
 	conv.sequenceConfig.sequenceIntEnable = true;
 	conv.sequenceConfig.ovrunIntEnable    = true;
 	conv.sampleTime   = max_smp;
-	conv.clockDivider = (adc_clk_divide_t)config->clk_div;
+	/* ADC module internal clock divider (CFG1.PRS = ytmicro,adc-clock-divider).
+	 * Separate from the IPC clock tree divider (ytmicro,functional-clock-divider).
+	 * Encoding: 0=÷1, 1=÷2, 2=÷4 (default), 3=÷8.
+	 * With IPC = FIRC/6 = 16 MHz and default PRS=2: ADC core = 4 MHz (within 2–32 MHz).
+	 */
+	conv.clockDivider = (adc_clk_divide_t)config->adc_clk_div;
 	conv.resolution   = bits_to_resolution(ctx->sequence.resolution);
 	conv.align        = ADC_ALIGN_RIGHT;
 
@@ -337,12 +349,21 @@ static void adc_ytm32_isr(const struct device *dev)
 
 	if (ADC_DRV_GetEndOfSequenceFlag(inst)) {
 		ADC_DRV_ClearEoseqFlagCmd(inst);
+		/* Stop the ADC BEFORE reading the FIFO.  In LOOP mode the hardware
+		 * immediately starts a new conversion after EOSEQ.  If we stop here
+		 * first, no additional conversion can complete and re-assert EOSEQ
+		 * while we are in this ISR.  Without this ordering, the extra EOSEQ
+		 * fires a spurious interrupt after adc_read() returns, which calls
+		 * adc_context_complete() and increments ctx->sync — causing the
+		 * next adc_read() to return immediately without waiting for a real
+		 * conversion (buffer stays 0xFFFF).
+		 */
+		ADC_DRV_Stop(inst);
 
 		for (uint8_t i = 0U; i < data->channel_count; i++) {
 			data->buffer[i] = ADC_DRV_ReadFIFO(inst);
 		}
 
-		ADC_DRV_Stop(inst);
 		adc_context_on_sampling_done(&data->ctx, dev);
 	}
 }
@@ -542,7 +563,12 @@ int adc_ytm32_dma_start(const struct device *dev,
 	conv.sequenceConfig.sequenceIntEnable = false;
 	conv.sequenceConfig.ovrunIntEnable    = false;
 	conv.sampleTime   = max_smp;
-	conv.clockDivider = (adc_clk_divide_t)config->clk_div;
+	/* ADC module internal clock divider (CFG1.PRS = ytmicro,adc-clock-divider).
+	 * Separate from the IPC clock tree divider (ytmicro,functional-clock-divider).
+	 * Encoding: 0=÷1, 1=÷2, 2=÷4 (default), 3=÷8.
+	 * With IPC = FIRC/6 = 16 MHz and default PRS=2: ADC core = 4 MHz (within 2–32 MHz).
+	 */
+	conv.clockDivider = (adc_clk_divide_t)config->adc_clk_div;
 	conv.resolution   = bits_to_resolution(cfg->resolution);
 	conv.align        = ADC_ALIGN_RIGHT;
 	conv.trigger      = hw_trig ? ADC_TRIGGER_HARDWARE : ADC_TRIGGER_SOFTWARE;
@@ -706,8 +732,8 @@ static DEVICE_API(adc, adc_ytm32_driver_api) = {
 		.clock_dev    = DEVICE_DT_GET(DT_INST_CLOCKS_CTLR(inst)),	\
 		.clock_subsys = (clock_control_subsys_t)			\
 				DT_INST_CLOCKS_CELL(inst, id),			\
-		.clk_div      = DT_INST_PROP(inst,				\
-				ytmicro_functional_clock_divider),		\
+		.adc_clk_div  = DT_INST_PROP(inst,				\
+				ytmicro_adc_clock_divider),			\
 		.pincfg       = PINCTRL_DT_INST_DEV_CONFIG_GET(inst),		\
 		.irq_config_func = adc_ytm32_irq_config_##inst,			\
 		.dma_dev      = YTM32_ADC_DMA_DEV(inst),			\

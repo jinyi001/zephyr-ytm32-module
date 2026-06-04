@@ -16,6 +16,55 @@ LOG_MODULE_REGISTER(clock_control_ytm32, CONFIG_CLOCK_CONTROL_LOG_LEVEL);
 #include <zephyr/sys/util.h>
 #include <zephyr/dt-bindings/clock/ytmicro,ytm32-soc-clock.h>
 
+/*
+ * ── CGU clock-tree compile-time constraints (RM §12.1) ───────────────────────
+ *
+ * These BUILD_ASSERTs cross-validate the DTS properties against each other and
+ * against the C header constants.  They catch:
+ *   1. Wrong crystal frequency (out-of-spec FXOSC value)
+ *   2. core-clock inconsistent with fxosc-frequency / core-divider
+ *   3. CONFIG_SYS_CLOCK_HW_CYCLES_PER_SEC diverged from the DTS core-clock
+ *   4. YTM32_FIRC_HZ / YTM32_SIRC_HZ in clock.h diverged from the DTSI
+ */
+
+/* (1) FIRC / SIRC constants in clock.h must match the DTSI hardware fact. */
+BUILD_ASSERT(
+	DT_PROP_OR(DT_NODELABEL(cgu), firc_frequency, YTM32_FIRC_HZ) == YTM32_FIRC_HZ,
+	"firc-frequency in DTS contradicts YTM32_FIRC_HZ in clock.h");
+BUILD_ASSERT(
+	DT_PROP_OR(DT_NODELABEL(cgu), sirc_frequency, YTM32_SIRC_HZ) == YTM32_SIRC_HZ,
+	"sirc-frequency in DTS contradicts YTM32_SIRC_HZ in clock.h");
+
+/* (2) FXOSC range: RM §12.1 permits 4~40 MHz.  Assertion is skipped when the
+ *     system clock source is not FXOSC (logical-OR short-circuit). */
+BUILD_ASSERT(
+	DT_PROP(DT_NODELABEL(cgu), system_clock_source) != YTM32_SYSTEM_CLOCK_SRC_FXOSC ||
+	(DT_PROP(DT_NODELABEL(cgu), fxosc_frequency) >= 4000000U &&
+	 DT_PROP(DT_NODELABEL(cgu), fxosc_frequency) <= 40000000U),
+	"fxosc-frequency out of spec: RM §12.1 allows 4~40 MHz only");
+
+/* (3) core-clock must equal the derived value (source / core-divider). */
+BUILD_ASSERT(
+	DT_PROP(DT_NODELABEL(cgu), system_clock_source) != YTM32_SYSTEM_CLOCK_SRC_FXOSC ||
+	DT_PROP(DT_NODELABEL(cgu), core_clock) ==
+		DT_PROP(DT_NODELABEL(cgu), fxosc_frequency) /
+		DT_PROP(DT_NODELABEL(cgu), core_divider),
+	"core-clock != fxosc-frequency / core-divider (update core-clock in DTS)");
+BUILD_ASSERT(
+	DT_PROP(DT_NODELABEL(cgu), system_clock_source) != YTM32_SYSTEM_CLOCK_SRC_FIRC ||
+	DT_PROP(DT_NODELABEL(cgu), core_clock) ==
+		YTM32_FIRC_HZ / DT_PROP(DT_NODELABEL(cgu), core_divider),
+	"core-clock != YTM32_FIRC_HZ / core-divider (update core-clock in DTS)");
+
+/* (4) Kconfig SysTick frequency must match the CGU core-clock in DTS. */
+BUILD_ASSERT(
+	CONFIG_SYS_CLOCK_HW_CYCLES_PER_SEC ==
+		DT_PROP(DT_NODELABEL(cgu), core_clock),
+	"CONFIG_SYS_CLOCK_HW_CYCLES_PER_SEC != CGU core-clock: "
+	"check Kconfig.defconfig dt_node_int_prop_int derivation");
+
+/* ─────────────────────────────────────────────────────────────────────────── */
+
 /* Driver-private constants — not part of the dt-binding public API */
 #define YTM32_IPC_DIV_MIN 1U
 #define YTM32_IPC_DIV_MAX 16U

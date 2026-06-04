@@ -24,10 +24,27 @@ properties:
   ytmicro,functional-clock-divider:
     type: int
     required: false
-    default: 3
+    default: 1
     description: |
-      ADC clock divider register value. Actual divisor = value + 1.
-      Default 3 means divide-by-4 (16 MHz FXOSC -> 4 MHz ADC clock).
+      IPC peripheral clock divider for the ADC bus clock.
+      Passed to the YTM32 clock controller; the hardware divides the selected
+      source by this value.  Default 1 = no division (source clock direct).
+      This is separate from the ADC module's internal clock divider
+      (ytmicro,adc-clock-divider), which further divides the IPC clock.
+
+  ytmicro,adc-clock-divider:
+    type: int
+    required: false
+    default: 2
+    description: |
+      ADC module internal clock divider (CFG1.PRS register field).
+      Encoding matches the SDK adc_clk_divide_t enum:
+        0 = divide by 1  (ADC_CLK_DIVIDE_1)
+        1 = divide by 2  (ADC_CLK_DIVIDE_2)
+        2 = divide by 4  (ADC_CLK_DIVIDE_4, SDK default ADC_DEFAULT_CLOCK_DIVIDER)
+        3 = divide by 8  (ADC_CLK_DIVIDE_8)
+      Final ADC core clock = IPC-clock / (2 ^ adc-clock-divider).
+      RM §30.1: ADC core clock must be within 2–32 MHz.
 
   dmas:
     type: phandle-array
