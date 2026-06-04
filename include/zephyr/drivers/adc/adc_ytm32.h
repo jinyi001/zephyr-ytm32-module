@@ -14,8 +14,11 @@
  *   1. Configure channels with adc_channel_setup() as normal.
  *   2. Allocate a buffer of channel_count * depth * sizeof(uint16_t) bytes.
  *   3. Call adc_ytm32_dma_start() once.
- *   4. The callback fires every 'depth' PWM periods with a pointer to the
- *      filled buffer.  Re-arm is automatic; call adc_ytm32_dma_stop() to halt.
+ *   4. The callback fires every 'depth' conversions with a pointer to the
+ *      filled buffer.  The callback runs in ISR context and does NOT re-arm
+ *      (to avoid ISR starvation in continuous mode).  Call
+ *      adc_ytm32_dma_resume() from thread context for the next batch, or
+ *      adc_ytm32_dma_stop() to halt.
  *
  * Buffer layout (depth=2, channels={0,2,4}):
  *   [ch0_period0, ch2_period0, ch4_period0,
@@ -153,6 +156,18 @@ int adc_ytm32_dma_start(const struct device *dev,
  * @return 0 on success, negative errno on failure
  */
 int adc_ytm32_dma_stop(const struct device *dev);
+
+/**
+ * @brief Re-arm DMA for the next batch (thread context only).
+ *
+ * After the DMA callback fires (in ISR context), call this from thread
+ * context to prepare the DMA/ADC for the next sampling batch.  Stops the
+ * ADC briefly, re-arms DMA, and restarts the ADC.
+ *
+ * @param dev ADC device
+ * @return 0 on success, negative errno on failure
+ */
+int adc_ytm32_dma_resume(const struct device *dev);
 
 #ifdef __cplusplus
 }

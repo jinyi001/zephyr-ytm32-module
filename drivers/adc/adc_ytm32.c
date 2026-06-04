@@ -435,6 +435,14 @@ static void adc_ytm32_dma_cb(void *user_data, int hal_status)
 				 data->dma_cfg.depth,
 				 data->dma_cfg.user_data);
 	}
+
+	/* Stop DMA immediately after the batch.  In continuous mode the ADC
+	 * keeps generating DMA requests; without an explicit stop the DMA
+	 * auto-restarts and the ISR fires in a tight loop (starving PendSV
+	 * and the thread waiting on the semaphore).  The caller must call
+	 * adc_ytm32_dma_resume() from thread context for the next batch.
+	 */
+	ytm32_dma_hal_stop(config->dma_channel);
 }
 
 /* ──────────────────────── Phase 2: internal helpers ─────────────────── */
@@ -532,7 +540,7 @@ int adc_ytm32_dma_start(const struct device *dev,
 	 */
 	uintptr_t fifo_addr = (uintptr_t)(config->base + YTM32_ADC_FIFO_OFFSET);
 
-	ret = ytm32_dma_hal_channel_config_loop_reload(
+	ret = ytm32_dma_hal_channel_config_loop(
 		config->dma_channel,
 		config->dma_slot,
 		fifo_addr,
@@ -629,6 +637,57 @@ int adc_ytm32_dma_stop(const struct device *dev)
 	ADC_DRV_Disable(config->instance);
 	ytm32_dma_hal_stop(config->dma_channel);
 	ytm32_dma_hal_channel_release(config->dma_channel);
+
+	return 0;
+}
+
+int adc_ytm32_dma_resume(const struct device *dev)
+{
+	struct adc_ytm32_data *data = dev->data;
+	const struct adc_ytm32_config *config = dev->config;
+
+	if (!data->dma_active) {
+		return -EINVAL;
+	}
+
+	/* Stop ADC to prevent FIFO overflow while DMA is being re-armed. */
+	ADC_DRV_Stop(config->instance);
+
+	/* Reconfigure DMA for one more batch of the same shape. */
+	uintptr_t fifo_addr = (uintptr_t)(config->base + YTM32_ADC_FIFO_OFFSET);
+
+	int ret = ytm32_dma_hal_channel_config_loop(
+		config->dma_channel,
+		config->dma_slot,
+		fifo_addr,
+		(uintptr_t)data->dma_cfg.buf,
+		sizeof(uint16_t),
+		data->channel_count,
+		data->dma_cfg.depth,
+		adc_ytm32_dma_cb,
+		(void *)dev);
+	if (ret < 0) {
+		LOG_ERR("DMA reconfig failed: %d", ret);
+		return ret;
+	}
+
+	ytm32_dma_hal_start(config->dma_channel);
+
+	if (data->dma_cfg.trigger == ADC_YTM32_DMA_TRIGGER_HARDWARE) {
+		/* Hardware trigger: re-arm the ADC trigger gate. */
+		ADC_DRV_Enable(config->instance);
+		for (uint32_t i = 0; i < 10000U; i++) {
+			if (ADC_DRV_GetReadyFlag(config->instance)) {
+				break;
+			}
+		}
+		ret = adc_ytm32_arm_hw_trigger(dev);
+		if (ret < 0) {
+			return ret;
+		}
+	} else {
+		ADC_DRV_Start(config->instance);
+	}
 
 	return 0;
 }
