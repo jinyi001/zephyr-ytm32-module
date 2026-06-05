@@ -90,6 +90,7 @@ struct adc_ytm32_config {
 	uint32_t                         adc_clk_div; /* CFG1.PRS — ADC internal divider */
 	const struct pinctrl_dev_config *pincfg;
 	void (*irq_config_func)(void);
+	IRQn_Type                         irq;
 	/* Phase 2: DMA and hardware trigger (optional) */
 	const struct device             *dma_dev;     /* NULL if DMA not wired */
 	uint8_t                          dma_channel;
@@ -109,6 +110,7 @@ struct adc_ytm32_data {
 	uint8_t              sample_time[YTM32_ADC_MAX_CHANS];
 	/* Phase 2 */
 	bool                 dma_active;
+	int                  dma_error;
 	struct adc_ytm32_dma_config dma_cfg; /* copy of user config */
 };
 
@@ -326,7 +328,26 @@ static void adc_context_update_buffer_pointer(struct adc_context *ctx,
 	}
 }
 
-/* ──────────────────────── ISR (Phase 1) ──────────────────────── */
+/* ──────────────────────── ISR (Phase 1 + DMA notify) ───────────────── */
+
+static void adc_ytm32_dma_notify_isr(const struct device *dev)
+{
+	struct adc_ytm32_data *data = dev->data;
+
+	if (data->dma_error != 0) {
+		LOG_ERR("DMA error %d", data->dma_error);
+		data->dma_error = 0;
+		data->dma_active = false;
+		return;
+	}
+
+	if (data->dma_cfg.cb != NULL) {
+		data->dma_cfg.cb(dev, data->dma_cfg.buf,
+				 data->channel_count,
+				 data->dma_cfg.depth,
+				 data->dma_cfg.user_data);
+	}
+}
 
 static void adc_ytm32_isr(const struct device *dev)
 {
@@ -334,8 +355,12 @@ static void adc_ytm32_isr(const struct device *dev)
 	const struct adc_ytm32_config *config = dev->config;
 	uint8_t inst = config->instance;
 
-	/* DMA mode: ADC interrupts are disabled — this path should not fire */
-	if (data->dma_active) {
+	/* DMA mode: ADC peripheral interrupts are disabled.  The DMA top-half pends
+	 * this ADC IRQ in software only to run the normal notification callback from
+	 * regular Zephyr ISR context.
+	 */
+	if (data->dma_active || data->dma_error != 0) {
+		adc_ytm32_dma_notify_isr(dev);
 		return;
 	}
 
@@ -423,26 +448,41 @@ static void adc_ytm32_dma_cb(void *user_data, int hal_status)
 	}
 
 	if (hal_status != 0) {
-		LOG_ERR("DMA error %d", hal_status);
+		/* No logging from a possible zero-latency top-half; report it from the
+		 * software-pended ADC notification ISR instead.
+		 */
+		data->dma_error = hal_status;
+		ytm32_dma_hal_stop(config->dma_channel);
 		data->dma_active = false;
 		ADC_DRV_Stop(config->instance);
+		NVIC_SetPendingIRQ(config->irq);
 		return;
 	}
 
-	if (data->dma_cfg.cb != NULL) {
-		data->dma_cfg.cb(dev, data->dma_cfg.buf,
-				 data->channel_count,
-				 data->dma_cfg.depth,
-				 data->dma_cfg.user_data);
-	}
-
-	/* Stop DMA immediately after the batch.  In continuous mode the ADC
-	 * keeps generating DMA requests; without an explicit stop the DMA
-	 * auto-restarts and the ISR fires in a tight loop (starving PendSV
-	 * and the thread waiting on the semaphore).  The caller must call
-	 * adc_ytm32_dma_resume() from thread context for the next batch.
+	/* Stop DMA immediately after the batch, before any user callback runs.  In
+	 * continuous mode the ADC keeps generating DMA requests; without this stop the
+	 * DMA can auto-restart and re-enter the ISR before the waiting thread resumes.
 	 */
 	ytm32_dma_hal_stop(config->dma_channel);
+
+	/* Call the zero-latency-safe callback from the DMA top-half.  This callback
+	 * must not use Zephyr kernel APIs; it is for register reads/writes or other
+	 * bounded latency-sensitive work only.
+	 */
+	if (data->dma_cfg.zl_cb != NULL) {
+		data->dma_cfg.zl_cb(dev, data->dma_cfg.buf,
+				    data->channel_count,
+				    data->dma_cfg.depth,
+				    data->dma_cfg.user_data);
+	}
+
+	/* Defer the normal callback to a regular-priority software IRQ so callers may
+	 * use ISR-safe kernel APIs such as k_sem_give(), even when the DMA top-half is
+	 * later connected as a zero-latency direct interrupt.
+	 */
+	if (data->dma_cfg.cb != NULL) {
+		NVIC_SetPendingIRQ(config->irq);
+	}
 }
 
 /* ──────────────────────── Phase 2: internal helpers ─────────────────── */
@@ -498,7 +538,7 @@ int adc_ytm32_dma_start(const struct device *dev,
 		return -ENOTSUP;
 	}
 	if (cfg->channels == 0 || cfg->buf == NULL || cfg->depth == 0 ||
-	    cfg->cb == NULL) {
+	    (cfg->cb == NULL && cfg->zl_cb == NULL)) {
 		return -EINVAL;
 	}
 	if (data->dma_active) {
@@ -521,6 +561,7 @@ int adc_ytm32_dma_start(const struct device *dev,
 
 	/* Save config for re-arm in callback */
 	data->dma_cfg     = *cfg;
+	data->dma_error   = 0;
 	data->channel_count = ch_count;
 
 	/* 1. (hardware mode) Route the eTMR trigger via TMU to ADC0_EXT_TRIG and
@@ -782,12 +823,13 @@ static DEVICE_API(adc, adc_ytm32_driver_api) = {
 			    DT_INST_IRQ(inst, priority),			\
 			    adc_ytm32_isr,					\
 			    DEVICE_DT_INST_GET(inst), 0);			\
-		irq_enable(DT_INST_IRQN(inst));					\
+		irq_enable(DT_INST_IRQN(inst));				\
 	}									\
 										\
 	static const struct adc_ytm32_config adc_ytm32_cfg_##inst = {		\
 		.base         = DT_INST_REG_ADDR(inst),				\
 		.instance     = 0U,						\
+		.irq          = (IRQn_Type)DT_INST_IRQN(inst),			\
 		.clock_dev    = DEVICE_DT_GET(DT_INST_CLOCKS_CTLR(inst)),	\
 		.clock_subsys = (clock_control_subsys_t)			\
 				DT_INST_CLOCKS_CELL(inst, id),			\

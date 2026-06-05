@@ -7,3 +7,10 @@ config DMA_YTM32
 	  Enable DMA driver for YTM32 series. Provides the Zephyr DMA API
 	  and connects all per-channel IRQ handlers required by peripherals
 	  (SPI, UART, I2C) that use DMA mode through the vendor HAL.
+
+config DMA_YTM32_CH8_ZERO_LATENCY
+	bool "Connect DMA channel 8 as a zero-latency direct IRQ"
+	depends on DMA_YTM32 && ZERO_LATENCY_IRQS
+	help
+	  Connect DMA8_IRQn with IRQ_DIRECT_CONNECT and IRQ_ZERO_LATENCY for the
+	  ADC DMA motor-control path. Other DMA channels remain normal Zephyr IRQs.

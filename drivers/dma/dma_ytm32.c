@@ -11,6 +11,7 @@
 #include <zephyr/drivers/clock_control.h>
 #include <zephyr/drivers/dma.h>
 #include <zephyr/kernel.h>
+#include <zephyr/irq.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/atomic.h>
 #include <zephyr/sys/util.h>
@@ -71,10 +72,22 @@ static void dma_ytm32_hal_cb(void *user_data, int hal_status)
 
 /* ─────────────────────────── IRQ handlers ─────────────────────────── */
 
+/*
+ * Per-channel ISR wrapper — receives the channel index as arg.
+ * Registered via IRQ_CONNECT at the DTS priority through _isr_wrapper.
+ */
 static void dma_ytm32_chan_irq(const void *arg)
 {
 	ytm32_dma_hal_irq((uint8_t)(uintptr_t)arg);
 }
+
+#if defined(CONFIG_DMA_YTM32_CH8_ZERO_LATENCY)
+ISR_DIRECT_DECLARE(dma_ytm32_ch8_zli_isr)
+{
+	ytm32_dma_hal_irq(8U);
+	return 0;
+}
+#endif
 
 static void dma_ytm32_error_irq(const void *arg)
 {
@@ -223,11 +236,28 @@ static DEVICE_API(dma, dma_ytm32_api) = {
 	.get_status = dma_ytm32_get_status,
 };
 
-#define YTM32_DMA_IRQ_CONNECT_CHAN(i, n) \
+/* DMA channel IRQ registration.  When requested, ch8 is connected as a Zephyr
+ * zero-latency direct IRQ for the ADC DMA path; all other channels keep the
+ * normal _isr_wrapper trampoline so their callbacks may use regular ISR-safe
+ * Zephyr APIs.
+ */
+#define YTM32_DMA_IRQ_CONNECT_NORMAL_CHAN(i, n) \
 	IRQ_CONNECT(DT_INST_IRQ_BY_IDX(n, i, irq), \
 		    DT_INST_IRQ_BY_IDX(n, i, priority), \
 		    dma_ytm32_chan_irq, (const void *)(uintptr_t)(i), 0); \
 	irq_enable(DT_INST_IRQ_BY_IDX(n, i, irq))
+
+#if defined(CONFIG_DMA_YTM32_CH8_ZERO_LATENCY)
+#define YTM32_DMA_IRQ_CONNECT_CHAN(i, n) \
+	COND_CODE_1(IS_EQ(i, 8), \
+		(IRQ_DIRECT_CONNECT(DT_INST_IRQ_BY_IDX(n, i, irq), \
+				    0, dma_ytm32_ch8_zli_isr, IRQ_ZERO_LATENCY); \
+		 irq_enable(DT_INST_IRQ_BY_IDX(n, i, irq))), \
+		(YTM32_DMA_IRQ_CONNECT_NORMAL_CHAN(i, n)))
+#else
+#define YTM32_DMA_IRQ_CONNECT_CHAN(i, n) \
+	YTM32_DMA_IRQ_CONNECT_NORMAL_CHAN(i, n)
+#endif
 
 #define YTM32_DMA_INIT(n) \
 	static struct ytm32_dma_data dma_ytm32_data_##n; \
