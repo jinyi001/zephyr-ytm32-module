@@ -11,28 +11,14 @@
 #include <zephyr/drivers/clock_control.h>
 #include <zephyr/drivers/watchdog.h>
 #include <zephyr/irq.h>
-#include <zephyr/sys/sys_io.h>
 #include <zephyr/sys/util.h>
 
-#define YTM32_WDG_BASE 0x4006A000U
-#define YTM32_WDG_SVCR_OFFSET  0x00U
-#define YTM32_WDG_CR_OFFSET    0x04U
-#define YTM32_WDG_LR_OFFSET    0x08U
-#define YTM32_WDG_TOVR_OFFSET  0x0CU
-#define YTM32_WDG_WVR_OFFSET   0x10U
-#define YTM32_WDG_INTF_OFFSET  0x18U
+#include "device_registers.h"
 
-#define YTM32_WDG_CR_EN             BIT(0)
-#define YTM32_WDG_CR_DBGDIS         BIT(1)
-#define YTM32_WDG_CR_DSDIS          BIT(2)
-#define YTM32_WDG_CR_CLKSRC_SHIFT   3U
-#define YTM32_WDG_CR_CLKSRC_MASK    GENMASK(4, 3)
-
-#define YTM32_WDG_LR_SL             BIT(0)
-#define YTM32_WDG_LR_HL             BIT(1)
-
-#define YTM32_WDG_INTF_IF           BIT(0)
-
+/* Register layout (WDG_Type) and all field masks/shifts come from the vendor
+ * HAL device header selected by device_registers.h.  Only the service-code
+ * protocol values and timing limits below are not part of that header.
+ */
 #define YTM32_WDG_UNLOCK_VALUE_1    0xB631U
 #define YTM32_WDG_UNLOCK_VALUE_2    0xC278U
 #define YTM32_WDG_TRIGGER_VALUE_1   0xA518U
@@ -55,7 +41,7 @@
 	(WDT_OPT_PAUSE_IN_SLEEP | WDT_OPT_PAUSE_HALTED_BY_DBG)
 
 #define YTM32_WDG_INSTANCE_VALID(addr) \
-	BUILD_ASSERT((uint32_t)(addr) == YTM32_WDG_BASE, \
+	BUILD_ASSERT((uint32_t)(addr) == WDG0_BASE, \
 		     "WDG reg address does not match WDG0")
 
 struct ytm32_wdg_config {
@@ -72,53 +58,42 @@ struct ytm32_wdg_data {
 	bool enabled;
 };
 
-static inline uintptr_t ytm32_wdg_base(const struct device *dev)
+static inline WDG_Type *ytm32_wdg_regs(const struct device *dev)
 {
 	const struct ytm32_wdg_config *config = dev->config;
 
-	return config->base;
+	return (WDG_Type *)config->base;
 }
 
-static inline uint32_t ytm32_wdg_read(uintptr_t base, uint32_t offset)
+static inline void ytm32_wdg_unlock_regs(WDG_Type *wdg)
 {
-	return sys_read32(base + offset);
+	wdg->SVCR = YTM32_WDG_UNLOCK_VALUE_1;
+	wdg->SVCR = YTM32_WDG_UNLOCK_VALUE_2;
 }
 
-static inline void ytm32_wdg_write(uintptr_t base, uint32_t offset, uint32_t value)
+static inline void ytm32_wdg_trigger(WDG_Type *wdg)
 {
-	sys_write32(value, base + offset);
+	wdg->SVCR = YTM32_WDG_TRIGGER_VALUE_1;
+	wdg->SVCR = YTM32_WDG_TRIGGER_VALUE_2;
 }
 
-static inline void ytm32_wdg_unlock_regs(uintptr_t base)
+static inline bool ytm32_wdg_is_enabled(WDG_Type *wdg)
 {
-	ytm32_wdg_write(base, YTM32_WDG_SVCR_OFFSET, YTM32_WDG_UNLOCK_VALUE_1);
-	ytm32_wdg_write(base, YTM32_WDG_SVCR_OFFSET, YTM32_WDG_UNLOCK_VALUE_2);
+	return (wdg->CR & WDG_CR_EN_MASK) != 0U;
 }
 
-static inline void ytm32_wdg_trigger(uintptr_t base)
+static inline bool ytm32_wdg_is_unlocked(WDG_Type *wdg)
 {
-	ytm32_wdg_write(base, YTM32_WDG_SVCR_OFFSET, YTM32_WDG_TRIGGER_VALUE_1);
-	ytm32_wdg_write(base, YTM32_WDG_SVCR_OFFSET, YTM32_WDG_TRIGGER_VALUE_2);
+	return (wdg->LR & (WDG_LR_HL_MASK | WDG_LR_SL_MASK)) == 0U;
 }
 
-static inline bool ytm32_wdg_is_enabled(uintptr_t base)
-{
-	return (ytm32_wdg_read(base, YTM32_WDG_CR_OFFSET) & YTM32_WDG_CR_EN) != 0U;
-}
-
-static inline bool ytm32_wdg_is_unlocked(uintptr_t base)
-{
-	return (ytm32_wdg_read(base, YTM32_WDG_LR_OFFSET) &
-		(YTM32_WDG_LR_HL | YTM32_WDG_LR_SL)) == 0U;
-}
-
-static int ytm32_wdg_wait_unlock(uintptr_t base)
+static int ytm32_wdg_wait_unlock(WDG_Type *wdg)
 {
 	uint32_t attempts = YTM32_WDG_UNLOCK_TIMEOUT;
 
 	do {
-		ytm32_wdg_unlock_regs(base);
-		if (ytm32_wdg_is_unlocked(base)) {
+		ytm32_wdg_unlock_regs(wdg);
+		if (ytm32_wdg_is_unlocked(wdg)) {
 			return 0;
 		}
 	} while (--attempts > 0U);
@@ -168,10 +143,10 @@ static int ytm32_wdg_install_timeout(const struct device *dev,
 static int ytm32_wdg_setup(const struct device *dev, uint8_t options)
 {
 	const struct ytm32_wdg_config *config = dev->config;
-	uintptr_t base = ytm32_wdg_base(dev);
+	WDG_Type *wdg = ytm32_wdg_regs(dev);
 	struct ytm32_wdg_data *data = dev->data;
 	uint32_t key;
-	uint32_t cr = YTM32_WDG_CR_EN;
+	uint32_t cr = WDG_CR_EN_MASK;
 	int ret;
 
 	if ((options & ~YTM32_WDG_SUPPORTED_OPTIONS) != 0U) {
@@ -182,28 +157,28 @@ static int ytm32_wdg_setup(const struct device *dev, uint8_t options)
 		return -EINVAL;
 	}
 
-	if (data->enabled || ytm32_wdg_is_enabled(base)) {
+	if (data->enabled || ytm32_wdg_is_enabled(wdg)) {
 		return -EBUSY;
 	}
 
-	cr |= FIELD_PREP(YTM32_WDG_CR_CLKSRC_MASK, config->timeout_clock_source);
+	cr |= FIELD_PREP(WDG_CR_CLKSRC_MASK, config->timeout_clock_source);
 
 	if ((options & WDT_OPT_PAUSE_IN_SLEEP) != 0U) {
-		cr |= YTM32_WDG_CR_DSDIS;
+		cr |= WDG_CR_DSDIS_MASK;
 	}
 
 	if ((options & WDT_OPT_PAUSE_HALTED_BY_DBG) != 0U) {
-		cr |= YTM32_WDG_CR_DBGDIS;
+		cr |= WDG_CR_DBGDIS_MASK;
 	}
 
 	key = irq_lock();
-	ret = ytm32_wdg_wait_unlock(base);
+	ret = ytm32_wdg_wait_unlock(wdg);
 	if (ret == 0) {
-		ytm32_wdg_write(base, YTM32_WDG_TOVR_OFFSET, data->timeout_ticks);
-		ytm32_wdg_write(base, YTM32_WDG_WVR_OFFSET, 0U);
-		ytm32_wdg_write(base, YTM32_WDG_INTF_OFFSET, YTM32_WDG_INTF_IF);
-		ytm32_wdg_write(base, YTM32_WDG_CR_OFFSET, cr);
-		ytm32_wdg_write(base, YTM32_WDG_LR_OFFSET, YTM32_WDG_LR_SL);
+		wdg->TOVR = data->timeout_ticks;
+		wdg->WVR  = 0U;
+		wdg->INTF = WDG_INTF_IF_MASK;
+		wdg->CR   = cr;
+		wdg->LR   = WDG_LR_SL_MASK;
 		data->enabled = true;
 	}
 	irq_unlock(key);
@@ -213,7 +188,7 @@ static int ytm32_wdg_setup(const struct device *dev, uint8_t options)
 
 static int ytm32_wdg_feed(const struct device *dev, int channel_id)
 {
-	uintptr_t base = ytm32_wdg_base(dev);
+	WDG_Type *wdg = ytm32_wdg_regs(dev);
 	struct ytm32_wdg_data *data = dev->data;
 	uint32_t key;
 
@@ -222,7 +197,7 @@ static int ytm32_wdg_feed(const struct device *dev, int channel_id)
 	}
 
 	key = irq_lock();
-	ytm32_wdg_trigger(base);
+	ytm32_wdg_trigger(wdg);
 	irq_unlock(key);
 
 	return 0;
@@ -230,22 +205,22 @@ static int ytm32_wdg_feed(const struct device *dev, int channel_id)
 
 static int ytm32_wdg_disable(const struct device *dev)
 {
-	uintptr_t base = ytm32_wdg_base(dev);
+	WDG_Type *wdg = ytm32_wdg_regs(dev);
 	struct ytm32_wdg_data *data = dev->data;
 	uint32_t key;
 	int ret;
 
-	if (!data->enabled || !ytm32_wdg_is_enabled(base)) {
+	if (!data->enabled || !ytm32_wdg_is_enabled(wdg)) {
 		return -EFAULT;
 	}
 
 	key = irq_lock();
-	ret = ytm32_wdg_wait_unlock(base);
+	ret = ytm32_wdg_wait_unlock(wdg);
 	if (ret == 0) {
-		ytm32_wdg_write(base, YTM32_WDG_CR_OFFSET, YTM32_WDG_RESET_CR);
-		ytm32_wdg_write(base, YTM32_WDG_TOVR_OFFSET, YTM32_WDG_RESET_TOVR);
-		ytm32_wdg_write(base, YTM32_WDG_WVR_OFFSET, YTM32_WDG_RESET_WVR);
-		ytm32_wdg_trigger(base);
+		wdg->CR   = YTM32_WDG_RESET_CR;
+		wdg->TOVR = YTM32_WDG_RESET_TOVR;
+		wdg->WVR  = YTM32_WDG_RESET_WVR;
+		ytm32_wdg_trigger(wdg);
 		data->enabled = false;
 		data->timeout_valid = false;
 	}

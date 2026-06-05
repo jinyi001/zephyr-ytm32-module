@@ -30,6 +30,7 @@
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/util.h>
 
+#include "device_registers.h"
 #include "adc_driver.h"
 #include "../dma/ytm32_dma_hal.h"
 #include <zephyr/drivers/adc/adc_ytm32.h>
@@ -70,8 +71,6 @@ LOG_MODULE_REGISTER(adc_ytm32, CONFIG_ADC_LOG_LEVEL);
 /* Maximum external channel count across all YTM32 variants */
 #define YTM32_ADC_MAX_CHANS 38U
 
-/* ADC FIFO register offset within ADC peripheral (from the struct layout) */
-#define YTM32_ADC_FIFO_OFFSET 0x4CU
 
 /* YTM32_TMU_TARGET_ADC0_EXT_TRIG comes from dt-bindings/tmu/ytm32b1md1-tmu.h.
  * CIM trigger-select values come from dt-bindings/adc/ytm32b1md1-adc.h.
@@ -579,7 +578,7 @@ int adc_ytm32_dma_start(const struct device *dev,
 	/* 2. Configure DMA: each ADC DMA request drains one full channel sequence;
 	 * after 'depth' sequences the user buffer is full.
 	 */
-	uintptr_t fifo_addr = (uintptr_t)(config->base + YTM32_ADC_FIFO_OFFSET);
+	uintptr_t fifo_addr = (uintptr_t)&((ADC_Type *)config->base)->FIFO;
 
 	ret = ytm32_dma_hal_channel_config_loop(
 		config->dma_channel,
@@ -695,7 +694,7 @@ int adc_ytm32_dma_resume(const struct device *dev)
 	ADC_DRV_Stop(config->instance);
 
 	/* Reconfigure DMA for one more batch of the same shape. */
-	uintptr_t fifo_addr = (uintptr_t)(config->base + YTM32_ADC_FIFO_OFFSET);
+	uintptr_t fifo_addr = (uintptr_t)&((ADC_Type *)config->base)->FIFO;
 
 	int ret = ytm32_dma_hal_channel_config_loop(
 		config->dma_channel,

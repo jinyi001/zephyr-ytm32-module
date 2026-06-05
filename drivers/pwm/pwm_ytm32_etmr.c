@@ -14,6 +14,7 @@
 #include <zephyr/sys/util.h>
 #include <zephyr/irq.h>
 
+#include "device_registers.h"
 #include "etmr_pwm_driver.h"
 #include "etmr_oc_driver.h"
 #include "etmr_common.h"
@@ -375,13 +376,9 @@ void pwm_ytm32_update_3phase_isr(const struct device *dev,
  *   00=FIRC, 01=PLL, 10=FXOSC, 11=SIRC
  * SCU->DIV  bits [11:8] = FBDIVS (fast bus divider - 1)
  */
-#define SCU_BASE_ADDR   0x4007C000U
-#define SCU_STS_REG     (*(volatile uint32_t *)(SCU_BASE_ADDR + 0x08))
-#define SCU_DIV_REG     (*(volatile uint32_t *)(SCU_BASE_ADDR + 0x04))
-
 static uint32_t etmr_get_fast_bus_clk(void)
 {
-	uint32_t clkst = SCU_STS_REG & 0x3U;
+	uint32_t clkst = (SCU->STS & SCU_STS_CLKST_MASK) >> SCU_STS_CLKST_SHIFT;
 	uint32_t sys_clk;
 
 	switch (clkst) {
@@ -389,16 +386,25 @@ static uint32_t etmr_get_fast_bus_clk(void)
 		sys_clk = YTM32_FIRC_HZ;
 		break;
 	case 1U: /* PLL — read actual Fout from PLL_CTRL */
+#if defined(CPU_YTM32B1MD1)
 	{
-		uint32_t pll_ctrl = *(volatile uint32_t *)(SCU_BASE_ADDR + 0x20);
-		uint32_t ref_clk = (pll_ctrl & (1U << 4)) ? YTM32_FIRC_HZ
+		uint32_t pll_ctrl = SCU->PLL_CTRL;
+		uint32_t ref_clk = (pll_ctrl & SCU_PLL_CTRL_REFCLKSRCSEL_MASK)
+				   ? YTM32_FIRC_HZ
 				   : (uint32_t)DT_PROP(DT_NODELABEL(cgu),
 						       fxosc_frequency);
-		uint32_t fbdiv = ((pll_ctrl >> 16) & 0x3FU) + 1U;
-		uint32_t refdiv = ((pll_ctrl >> 8) & 0xFU) + 1U;
+		uint32_t fbdiv = ((pll_ctrl & SCU_PLL_CTRL_FBDIV_MASK)
+				  >> SCU_PLL_CTRL_FBDIV_SHIFT) + 1U;
+		uint32_t refdiv = ((pll_ctrl & SCU_PLL_CTRL_REFDIV_MASK)
+				   >> SCU_PLL_CTRL_REFDIV_SHIFT) + 1U;
 		sys_clk = (ref_clk * fbdiv) / (2U * refdiv);
 		break;
 	}
+#else
+		/* SoCs without an SCU PLL (e.g. YTM32B1MC0) never report CLKST=PLL. */
+		sys_clk = YTM32_FIRC_HZ;
+		break;
+#endif
 	case 2U: /* FXOSC — use DTS value */
 		sys_clk = DT_PROP(DT_NODELABEL(cgu), fxosc_frequency);
 		break;
@@ -407,7 +413,7 @@ static uint32_t etmr_get_fast_bus_clk(void)
 		break;
 	}
 
-	uint32_t fb_divs = (SCU_DIV_REG >> 8) & 0xFU;
+	uint32_t fb_divs = (SCU->DIV & SCU_DIV_FBDIVS_MASK) >> SCU_DIV_FBDIVS_SHIFT;
 
 	return sys_clk / (fb_divs + 1U);
 }

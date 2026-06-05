@@ -15,6 +15,13 @@
 #include <zephyr/spinlock.h>
 #include <zephyr/sys/sys_io.h>
 
+/*
+ * NOTE: Unlike the other YTM32 drivers, the register layout below is hand-rolled
+ * on purpose: the vendor HAL device headers (YTM32B1MD1.h / YTM32B1MC0.h via
+ * device_registers.h) do NOT model the LPTMR peripheral — there is no LPTMR_Type
+ * struct nor LPTMR_* field macros to reuse.  Do not "convert this to the HAL
+ * struct"; it would not compile.
+ */
 #define YTM32_LPTMR_BASE 0x4005D000U
 
 #define YTM32_LPTMR_CTRL_OFFSET 0x00U
