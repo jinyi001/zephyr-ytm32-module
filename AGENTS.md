@@ -84,12 +84,31 @@ Uppercase macro constants are not function names; the §1 rule governs them.
 Default: one file `<api>_ytm32[_<variant>].c` containing both the register work
 and the Zephyr glue.
 
-Split a separate `ytm32_<periph>_hal.c` HAL-wrapper layer **only** when the
-driver is genuinely complex *and* the HAL-wrapping is reused across modes/paths
-(roughly: large drivers where the register/HAL detail would otherwise drown the
-glue). Today only **can**, **dma**, and **spi** meet that bar. Do not split
-simple drivers (gpio, wdt, counter, …) — a two-file skeleton for a 200-line
-driver is pure overhead.
+There are two sanctioned ways to split, for two different reasons. Both are
+exceptions — do not reach for them on a simple driver, where a two-file skeleton
+for a 200-line driver is pure overhead.
+
+**(a) HAL-wrapper layer — `ytm32_<periph>_hal.c`.** Split this out **only** when
+the driver is genuinely complex *and* the HAL-wrapping is reused across
+modes/paths (roughly: large drivers where the register/HAL detail would
+otherwise drown the glue). Today only **can**, **dma**, and **spi** meet that
+bar. The wrapper keeps the `ytm32_<periph>_hal_*` prefix (the §2 exception).
+
+**(b) Optional-feature extension — `<api>_ytm32_<feature>.c`.** Split this out
+when a driver carries a **self-contained optional feature** that is large,
+behind its own public header, and roughly independent of the core data path —
+so a reader of the standard driver need not wade through it, and vice versa.
+The two TUs share their per-instance config/data through a private
+`<api>_ytm32_priv.h` (structs + shared constants + the few cross-TU prototypes;
+*not* a public API). All functions keep the file's normal §2 infix prefix.
+Today only **adc** meets this bar: `adc_ytm32.c` (Phase 1, standard
+interrupt-driven API) + `adc_ytm32_dma.c` (Phase 2, the hardware-triggered DMA
+extension behind `<zephyr/drivers/adc/adc_ytm32.h>`) + `adc_ytm32_priv.h`.
+
+When in doubt, stay single-file. Line count alone is **not** a reason to split:
+`can_ytm32.c` is ~950 lines but is a flat list of mandatory Zephyr CAN callbacks
+with the register layer already in `ytm32_can_hal.c` — splitting it further
+would only scatter the one-prefix-per-file greppability §2 exists to create.
 
 ---
 
