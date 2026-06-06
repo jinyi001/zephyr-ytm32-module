@@ -13,49 +13,24 @@
 #include <zephyr/dt-bindings/clock/ytmicro,ytm32-soc-clock.h>
 #include <zephyr/irq.h>
 #include <zephyr/spinlock.h>
-#include <zephyr/sys/sys_io.h>
+#include "device_registers.h"
 
 /*
- * NOTE: Unlike the other YTM32 drivers, the register layout below is hand-rolled
- * on purpose: the vendor HAL device headers (YTM32B1MD1.h / YTM32B1MC0.h via
- * device_registers.h) do NOT model the LPTMR peripheral — there is no LPTMR_Type
- * struct nor LPTMR_* field macros to reuse.  Do not "convert this to the HAL
- * struct"; it would not compile.
+ * Register layout (lpTMR_Type) and field masks/shifts come from the vendor HAL
+ * device header selected by device_registers.h.  Only the clock-source value
+ * encodings and counter limits below are not part of that header.
  */
-#define YTM32_LPTMR_BASE 0x4005D000U
-
-#define YTM32_LPTMR_CTRL_OFFSET 0x00U
-#define YTM32_LPTMR_PRS_OFFSET  0x04U
-#define YTM32_LPTMR_DIE_OFFSET  0x08U
-#define YTM32_LPTMR_STS_OFFSET  0x0CU
-#define YTM32_LPTMR_CMP_OFFSET  0x10U
-#define YTM32_LPTMR_LCNT_OFFSET 0x14U
-#define YTM32_LPTMR_CNT_OFFSET  0x18U
-
-#define YTM32_LPTMR_CTRL_TMODE BIT(2)
-#define YTM32_LPTMR_CTRL_MODE  BIT(1)
-#define YTM32_LPTMR_CTRL_EN    BIT(0)
-
-#define YTM32_LPTMR_PRS_PRES_MASK   GENMASK(6, 3)
-#define YTM32_LPTMR_PRS_BYPASS      BIT(2)
-#define YTM32_LPTMR_PRS_CLKSEL_MASK GENMASK(1, 0)
-
-#define YTM32_LPTMR_DIE_IE  BIT(0)
-#define YTM32_LPTMR_STS_CCF BIT(0)
-#define YTM32_LPTMR_CMP_MASK 0xFFFFU
-#define YTM32_LPTMR_CNT_MASK 0xFFFFU
-
 #define YTM32_LPTMR_CLOCK_SEL_FIRC  0U
 #define YTM32_LPTMR_CLOCK_SEL_SIRC  1U
 #define YTM32_LPTMR_CLOCK_SEL_FXOSC 2U
 #define YTM32_LPTMR_CLOCK_SEL_LPO   3U
 
 #define YTM32_LPTMR_COUNTER_CHANNELS 1U
-#define YTM32_LPTMR_DEFAULT_TOP      YTM32_LPTMR_CMP_MASK
+#define YTM32_LPTMR_DEFAULT_TOP      lpTMR_CMP_CMP_MASK
 
 #define YTM32_LPTMR_INSTANCE_VALID(addr) \
-	BUILD_ASSERT((uint32_t)(addr) == YTM32_LPTMR_BASE, \
-		     "LPTMR reg address does not match LPTMR0")
+	BUILD_ASSERT((uint32_t)(addr) == lpTMR0_BASE, \
+		     "LPTMR reg address does not match lpTMR0")
 
 #if defined(YTM32_CLOCK_SRC_LPO)
 #define YTM32_LPTMR_CLOCK_SOURCE_VALID(src) \
@@ -106,26 +81,19 @@ struct ytm32_lptmr_data {
 	bool sw_irq_pending;
 };
 
-static ALWAYS_INLINE uint32_t ytm32_lptmr_read(uintptr_t base, uint32_t offset)
+static ALWAYS_INLINE lpTMR_Type *ytm32_lptmr_regs(uintptr_t base)
 {
-	return sys_read32(base + offset);
+	return (lpTMR_Type *)base;
 }
 
-static ALWAYS_INLINE void ytm32_lptmr_write(uintptr_t base, uint32_t offset,
-					    uint32_t value)
+static ALWAYS_INLINE void ytm32_lptmr_reg_modify(volatile uint32_t *reg,
+						 uint32_t mask, uint32_t value)
 {
-	sys_write32(value, base + offset);
-}
+	uint32_t r = *reg;
 
-static ALWAYS_INLINE void ytm32_lptmr_write_mask(uintptr_t base, uint32_t offset,
-						  uint32_t mask,
-						  uint32_t value)
-{
-	uint32_t reg = ytm32_lptmr_read(base, offset);
-
-	reg &= ~mask;
-	reg |= (value & mask);
-	ytm32_lptmr_write(base, offset, reg);
+	r &= ~mask;
+	r |= (value & mask);
+	*reg = r;
 }
 
 static ALWAYS_INLINE bool ytm32_lptmr_uses_restart_mode(
@@ -158,79 +126,75 @@ static ALWAYS_INLINE bool ytm32_lptmr_irq_is_pending(unsigned int irqn)
 
 static ALWAYS_INLINE void ytm32_lptmr_set_enable(uintptr_t base, bool enable)
 {
-	ytm32_lptmr_write_mask(base, YTM32_LPTMR_CTRL_OFFSET, YTM32_LPTMR_CTRL_EN,
-			       enable ? YTM32_LPTMR_CTRL_EN : 0U);
+	ytm32_lptmr_reg_modify(&ytm32_lptmr_regs(base)->CTRL, lpTMR_CTRL_EN_MASK,
+			       enable ? lpTMR_CTRL_EN_MASK : 0U);
 }
 
 static ALWAYS_INLINE void ytm32_lptmr_set_free_running(uintptr_t base, bool enable)
 {
-	ytm32_lptmr_write_mask(base, YTM32_LPTMR_CTRL_OFFSET,
-			       YTM32_LPTMR_CTRL_TMODE,
-			       enable ? YTM32_LPTMR_CTRL_TMODE : 0U);
+	ytm32_lptmr_reg_modify(&ytm32_lptmr_regs(base)->CTRL, lpTMR_CTRL_TMODE_MASK,
+			       enable ? lpTMR_CTRL_TMODE_MASK : 0U);
 }
 
 static ALWAYS_INLINE void ytm32_lptmr_set_timer_mode(uintptr_t base)
 {
-	ytm32_lptmr_write_mask(base, YTM32_LPTMR_CTRL_OFFSET,
-			       YTM32_LPTMR_CTRL_MODE, 0U);
+	ytm32_lptmr_reg_modify(&ytm32_lptmr_regs(base)->CTRL, lpTMR_CTRL_MODE_MASK,
+			       0U);
 }
 
 static ALWAYS_INLINE bool ytm32_lptmr_interrupt_enabled(uintptr_t base)
 {
-	return (ytm32_lptmr_read(base, YTM32_LPTMR_DIE_OFFSET) &
-		YTM32_LPTMR_DIE_IE) != 0U;
+	return (ytm32_lptmr_regs(base)->DIE & lpTMR_DIE_IE_MASK) != 0U;
 }
 
 static ALWAYS_INLINE void ytm32_lptmr_set_interrupt(uintptr_t base, bool enable)
 {
-	ytm32_lptmr_write_mask(base, YTM32_LPTMR_DIE_OFFSET, YTM32_LPTMR_DIE_IE,
-			       enable ? YTM32_LPTMR_DIE_IE : 0U);
+	ytm32_lptmr_reg_modify(&ytm32_lptmr_regs(base)->DIE, lpTMR_DIE_IE_MASK,
+			       enable ? lpTMR_DIE_IE_MASK : 0U);
 }
 
 static ALWAYS_INLINE bool ytm32_lptmr_compare_flag_get(uintptr_t base)
 {
-	return (ytm32_lptmr_read(base, YTM32_LPTMR_STS_OFFSET) &
-		YTM32_LPTMR_STS_CCF) != 0U;
+	return (ytm32_lptmr_regs(base)->STS & lpTMR_STS_CCF_MASK) != 0U;
 }
 
 static ALWAYS_INLINE void ytm32_lptmr_compare_flag_clear(uintptr_t base)
 {
-	ytm32_lptmr_write(base, YTM32_LPTMR_STS_OFFSET,
-			  ytm32_lptmr_read(base, YTM32_LPTMR_STS_OFFSET) |
-			  YTM32_LPTMR_STS_CCF);
+	lpTMR_Type *regs = ytm32_lptmr_regs(base);
+
+	regs->STS = regs->STS | lpTMR_STS_CCF_MASK;
 }
 
 static ALWAYS_INLINE void ytm32_lptmr_set_prescaler(uintptr_t base, uint32_t value)
 {
-	ytm32_lptmr_write_mask(base, YTM32_LPTMR_PRS_OFFSET,
-			       YTM32_LPTMR_PRS_PRES_MASK,
-			       FIELD_PREP(YTM32_LPTMR_PRS_PRES_MASK, value));
+	ytm32_lptmr_reg_modify(&ytm32_lptmr_regs(base)->PRS, lpTMR_PRS_PRES_MASK,
+			       FIELD_PREP(lpTMR_PRS_PRES_MASK, value));
 }
 
 static ALWAYS_INLINE void ytm32_lptmr_set_bypass(uintptr_t base, bool enable)
 {
-	ytm32_lptmr_write_mask(base, YTM32_LPTMR_PRS_OFFSET,
-			       YTM32_LPTMR_PRS_BYPASS,
-			       enable ? YTM32_LPTMR_PRS_BYPASS : 0U);
+	ytm32_lptmr_reg_modify(&ytm32_lptmr_regs(base)->PRS, lpTMR_PRS_BYPASS_MASK,
+			       enable ? lpTMR_PRS_BYPASS_MASK : 0U);
 }
 
 static ALWAYS_INLINE void ytm32_lptmr_set_clock_source(uintptr_t base, uint32_t source)
 {
-	ytm32_lptmr_write_mask(base, YTM32_LPTMR_PRS_OFFSET,
-			       YTM32_LPTMR_PRS_CLKSEL_MASK,
-			       FIELD_PREP(YTM32_LPTMR_PRS_CLKSEL_MASK, source));
+	ytm32_lptmr_reg_modify(&ytm32_lptmr_regs(base)->PRS, lpTMR_PRS_CLKSEL_MASK,
+			       FIELD_PREP(lpTMR_PRS_CLKSEL_MASK, source));
 }
 
 static ALWAYS_INLINE void ytm32_lptmr_set_compare(uintptr_t base, uint32_t value)
 {
-	ytm32_lptmr_write(base, YTM32_LPTMR_CMP_OFFSET, value & YTM32_LPTMR_CMP_MASK);
+	ytm32_lptmr_regs(base)->CMP = value & lpTMR_CMP_CMP_MASK;
 }
 
 static ALWAYS_INLINE uint32_t ytm32_lptmr_get_counter(uintptr_t base)
 {
-	ytm32_lptmr_write(base, YTM32_LPTMR_LCNT_OFFSET, 0U);
+	lpTMR_Type *regs = ytm32_lptmr_regs(base);
 
-	return ytm32_lptmr_read(base, YTM32_LPTMR_CNT_OFFSET) & YTM32_LPTMR_CNT_MASK;
+	regs->LCNT = 0U;
+
+	return regs->CNT & lpTMR_CNT_CVAL_MASK;
 }
 
 static void ytm32_lptmr_program(const struct device *dev, bool running_after)
@@ -238,13 +202,14 @@ static void ytm32_lptmr_program(const struct device *dev, bool running_after)
 	const struct ytm32_lptmr_config *config = dev->config;
 	struct ytm32_lptmr_data *data = dev->data;
 	uintptr_t base = config->base;
+	lpTMR_Type *regs = ytm32_lptmr_regs(base);
 
 	ytm32_lptmr_set_enable(base, false);
-	ytm32_lptmr_write(base, YTM32_LPTMR_CTRL_OFFSET, 0U);
-	ytm32_lptmr_write(base, YTM32_LPTMR_STS_OFFSET, YTM32_LPTMR_STS_CCF);
-	ytm32_lptmr_write(base, YTM32_LPTMR_DIE_OFFSET, 0U);
-	ytm32_lptmr_write(base, YTM32_LPTMR_PRS_OFFSET, 0U);
-	ytm32_lptmr_write(base, YTM32_LPTMR_CMP_OFFSET, 0U);
+	regs->CTRL = 0U;
+	regs->STS  = lpTMR_STS_CCF_MASK;
+	regs->DIE  = 0U;
+	regs->PRS  = 0U;
+	regs->CMP  = 0U;
 
 	ytm32_lptmr_set_timer_mode(base);
 	ytm32_lptmr_set_free_running(base, !ytm32_lptmr_uses_restart_mode(data));
