@@ -14,9 +14,7 @@
 #include <zephyr/sys/util.h>
 #include <zephyr/irq.h>
 
-#include "device_registers.h"
 #include "etmr_pwm_driver.h"
-#include "etmr_oc_driver.h"
 #include "etmr_common.h"
 
 #include <zephyr/drivers/pwm/pwm_ytm32_etmr.h>
@@ -49,8 +47,8 @@ struct pwm_ytm32_config {
 	uint32_t adc_trigger_width;
 	/* Start the eTMR counter at driver init (DT ytmicro,autostart) */
 	bool autostart;
-	/* OC channel for mid-period ADC trigger (UINT8_MAX = disabled) */
-	uint8_t adc_mid_trig_channel;
+	/* Use OTRIG.MIDTEN + MID register for mid-period ADC trigger (DT ytmicro,adc-mid-trigger) */
+	bool adc_mid_trigger;
 };
 
 struct pwm_ytm32_data {
@@ -160,11 +158,6 @@ static int pwm_ytm32_set_cycles(const struct device *dev, uint32_t channel,
 		return -EINVAL;
 	}
 
-	/* mid-trig channel is managed internally; not exposed to callers */
-	if (channel == cfg->adc_mid_trig_channel) {
-		return -ENOTSUP;
-	}
-
 	/* Odd channel that is the comp output of a pair is read-only from HW */
 	if ((channel & 1U) && center) {
 		LOG_WRN("ch%u is a complementary output; set ch%u instead",
@@ -195,18 +188,11 @@ static int pwm_ytm32_set_cycles(const struct device *dev, uint32_t channel,
 		}
 		data->period_cycles = period_cycles;
 
-		/* Keep OC mid-trig VAL0 in sync with new MOD */
-		if (cfg->adc_mid_trig_channel < ETMR_CH_COUNT) {
+		/* Keep MID register in sync with new MOD for MIDTEN-based trigger. */
+		if (cfg->adc_mid_trigger) {
 			uint16_t new_mod = (uint16_t)data->etmr_state.etmrModValue;
 
-			eTMR_DRV_UpdateOutputCompareChannel(
-				cfg->instance,
-				cfg->adc_mid_trig_channel,
-				(uint16_t)(new_mod / 2U),
-				new_mod,
-				eTMR_OUTPUT_CLR,
-				eTMR_OUTPUT_CLR,
-				false);
+			g_etmrBase[cfg->instance]->MID = new_mod / 2U;
 		}
 	}
 
@@ -486,8 +472,8 @@ static int pwm_ytm32_init(const struct device *dev)
 		.outputTrigWidth        = (uint16_t)cfg->adc_trigger_width,
 		.outputTrigFreq         = 1U,
 		.modMatchTrigEnable     = false,
-		.midMatchTrigEnable     = false,
-		.initMatchTrigEnable    = true,
+		.midMatchTrigEnable     = cfg->adc_mid_trigger,
+		.initMatchTrigEnable    = cfg->adc_sync_trigger,
 		.numOfChannels          = 0U,
 		.channelTrigParamConfig = NULL,
 	};
@@ -565,60 +551,32 @@ static int pwm_ytm32_init(const struct device *dev)
 		return -EIO;
 	}
 
-	/* InitPwm rewrites timer registers, so configure OTRIG after PWM init. */
-	if (cfg->adc_sync_trigger) {
+	/* InitPwm resets OTRIG and MID, so configure them after PWM init.
+	 * adc_sync_trigger → INITEN fires eTMR<n>_INIT_TRIG (TMU slot 22) at
+	 * counter bottom each period.
+	 * adc_mid_trigger → MIDTEN fires eTMR<n>_EXT_TRIG (TMU slot 23) at
+	 * MID = MOD/2 each period; no channel consumed, no UpdatePwmPeriod clash.
+	 * Note: OTRIG.MIDTEN maps to EXT_TRIG (slot 23), not INIT_TRIG (slot 22).
+	 */
+	if (cfg->adc_sync_trigger || cfg->adc_mid_trigger) {
 		s = eTMR_DRV_SetOutputTrigger(cfg->instance, &trig_cfg);
 		if (s != STATUS_SUCCESS) {
 			LOG_ERR("eTMR_DRV_SetOutputTrigger failed (%d)", s);
 			return -EIO;
 		}
-		LOG_DBG("eTMR%u output trigger enabled for ADC sync", cfg->instance);
 	}
-
-	/*
-	 * 4. ADC-sync output trigger is configured as part of eTMR_DRV_Init()
-	 *    above, matching the SDK/FAE initialization order.  It emits a widened
-	 *    INIT-match pulse on eTMR<n>_INIT_TRIG for the TMU route.
-	 */
 
 	data->period_cycles = counter_freq(cfg, data) / cfg->pwm_freq_hz;
 
-	/*
-	 * 5. Optional mid-period ADC trigger via OC channel.
-	 *    InitOutputCompare is called AFTER InitPwm so that etmrModValue is
-	 *    already computed.  maxCountValue is set to the same etmrModValue,
-	 *    making the MOD write idempotent.  eTMR_Disable inside
-	 *    InitOutputCompare is harmless here because Enable hasn't been called
-	 *    yet (autostart happens below).
+	/* 5. Set MID = MOD/2 for MIDTEN-based mid-period ADC trigger.
+	 * InitPwm resets MID to 0, so this must come after InitPwm.
 	 */
-	if (cfg->adc_mid_trig_channel < ETMR_CH_COUNT) {
+	if (cfg->adc_mid_trigger) {
 		uint16_t mod = (uint16_t)data->etmr_state.etmrModValue;
-		etmr_oc_ch_param_t oc_ch = {
-			.hwChannelId            = cfg->adc_mid_trig_channel,
-			.channelInitVal         = 0U,
-			.val0CmpMode            = eTMR_OUTPUT_CLR,
-			.val1CmpMode            = eTMR_OUTPUT_CLR,
-			.cmpVal0                = (uint16_t)(mod / 2U),
-			.cmpVal1                = mod,
-			.enableExternalTrigger0 = true,
-			.enableExternalTrigger1 = false,
-			.interruptEnable        = false,
-		};
-		etmr_oc_param_t oc_param = {
-			.maxCountValue           = mod,
-			.nNumOutputChannels      = 1U,
-			.counterInitValFromInitReg = true,
-			.cntVal                  = 0U,
-			.outputChannelConfig     = &oc_ch,
-		};
-		s = eTMR_DRV_InitOutputCompare(cfg->instance, &oc_param);
-		if (s != STATUS_SUCCESS) {
-			LOG_ERR("eTMR_DRV_InitOutputCompare failed (%d)", s);
-			return -EIO;
-		}
-		LOG_DBG("eTMR%u CH%u OC mid-trig: VAL0=%u (MOD=%u)",
-			cfg->instance, cfg->adc_mid_trig_channel,
-			(unsigned)(mod / 2U), (unsigned)mod);
+
+		g_etmrBase[cfg->instance]->MID = mod / 2U;
+		LOG_DBG("eTMR%u MIDTEN: MID=%u (MOD=%u)",
+			cfg->instance, (unsigned)(mod / 2U), (unsigned)mod);
 	}
 
 	/*
@@ -703,10 +661,9 @@ static const struct pwm_driver_api pwm_ytm32_driver_api = {
 									\
 	BUILD_ASSERT(							\
 		!(DT_INST_PROP(inst, ytmicro_adc_sync_trigger) &&	\
-		  DT_INST_NODE_HAS_PROP(inst,				\
-			ytmicro_adc_mid_trig_channel)),			\
+		  DT_INST_PROP(inst, ytmicro_adc_mid_trigger)),		\
 		"ytmicro,adc-sync-trigger and "			\
-		"ytmicro,adc-mid-trig-channel are mutually exclusive");\
+		"ytmicro,adc-mid-trigger are mutually exclusive");\
 									\
 	PINCTRL_DT_INST_DEFINE(inst);					\
 									\
@@ -730,8 +687,8 @@ static const struct pwm_driver_api pwm_ytm32_driver_api = {
 		.adc_trigger_width = DT_INST_PROP_OR(inst,		\
 				ytmicro_adc_trigger_width, 16U),	\
 		.autostart = DT_INST_PROP(inst, ytmicro_autostart),	\
-		.adc_mid_trig_channel = DT_INST_PROP_OR(inst,		\
-				ytmicro_adc_mid_trig_channel, UINT8_MAX),\
+		.adc_mid_trigger = DT_INST_PROP(inst,			\
+				ytmicro_adc_mid_trigger),		\
 	};								\
 									\
 	static struct pwm_ytm32_data pwm_ytm32_data_##inst;		\

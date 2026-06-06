@@ -119,7 +119,7 @@ def generate(excel_path, output_path, sheet_name, source_name, soc_name):
         f"#define {guard}",
         "",
         "#define YTM32_PINMUX(port, pin, mux) \\",
-        "\t((((port) & 0xF) << 28) | (((pin) & 0x1F) << 24) | (((mux) & 0xF) << 0))",
+        "\t((((port) & 0xF) << 24) | (((pin) & 0x1F) << 16) | (((mux) & 0xF) << 0))",
         "",
     ]
 

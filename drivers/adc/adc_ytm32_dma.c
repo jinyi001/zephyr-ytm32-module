@@ -156,7 +156,7 @@ static void adc_ytm32_dma_cb(void *user_data, int hal_status)
  * MD1 workaround: clear stale ADSTART state via ADSTOP→ADSTART.
  * Without this, the hardware-trigger accept gate is not reliably armed after
  * ADC_DRV_Enable() + ADRDY.  Verified: ADSTOP→ADSTART immediately enables
- * trigger acceptance from INIT_TRIG(22).
+ * trigger acceptance from EXT_TRIG(23) and INIT_TRIG(22).
  * Failure mode without this: k_sem_take timeout in trigger_chain stage5.
  */
 static int adc_ytm32_arm_hw_trigger(const struct device *dev)
@@ -168,8 +168,8 @@ static int adc_ytm32_arm_hw_trigger(const struct device *dev)
 	 * Without this, the hardware-trigger accept gate is not reliably armed
 	 * after ADC_DRV_Enable() + ADRDY.  Use a bare counter loop — k_busy_wait
 	 * was found to interfere with the trigger acceptance timing on MD1.
-	 * Verified: ADSTOP→ADSTART immediately enables trigger acceptance from
-	 * INIT_TRIG(22).  Failure mode: k_sem_take timeout in stage5.
+	 * Verified: ADSTOP→ADSTART immediately enables trigger acceptance.
+	 * Failure mode: k_sem_take timeout in stage5.
 	 */
 	base->CTRL |= ADC_CTRL_ADSTOP_MASK;
 	for (uint32_t i = 0; i < 10000U; i++) {

@@ -7,7 +7,7 @@
 #define ZEPHYR_DT_BINDINGS_PINCTRL_YTM32B1MC0_PINCTRL_H
 
 #define YTM32_PINMUX(port, pin, mux) \
-    ((((port) & 0xF) << 28) | (((pin) & 0x1F) << 24) | (((mux) & 0xF) << 0))
+    ((((port) & 0xF) << 24) | (((pin) & 0x1F) << 16) | (((mux) & 0xF) << 0))
 
 #define YTM32_PTD1_GPIO                YTM32_PINMUX(3, 1, 1)
 #define YTM32_PTD1_eTMR0_CH3           YTM32_PINMUX(3, 1, 2)

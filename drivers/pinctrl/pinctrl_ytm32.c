@@ -21,8 +21,8 @@ int pinctrl_configure_pins(const pinctrl_soc_pin_t *pins, uint8_t pin_cnt, uintp
 	for (uint8_t i = 0; i < pin_cnt; i++) {
 		pin_settings_config_t config;
 		uint32_t pinmux = pins[i].pinmux;
-		uint32_t port = (pinmux >> 28) & 0xF;
-		uint32_t pin = (pinmux >> 24) & 0x1F;
+		uint32_t port = (pinmux >> 24) & 0xF;
+		uint32_t pin = (pinmux >> 16) & 0x1F;
 		uint32_t mux = pinmux & 0xF;
 
 		void *base = NULL;
