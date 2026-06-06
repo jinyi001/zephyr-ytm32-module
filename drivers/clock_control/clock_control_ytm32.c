@@ -89,7 +89,7 @@ BUILD_ASSERT(
  *   STATUS_MCU_GATED_OFF (0x100) -> -EAGAIN  (clock gated, may succeed later)
  *   anything else                -> -EIO
  */
-static inline int ytm32_hal_status_to_errno(int hal_status)
+static inline int clock_control_ytm32_hal_status_to_errno(int hal_status)
 {
 	switch ((uint32_t)hal_status) {
 	case YTM32_HAL_STATUS_SUCCESS:
@@ -121,13 +121,13 @@ struct clock_control_ytm32_data {
 	uint16_t module_refcnt[YTM32_CLOCK_IPC_END];
 };
 
-struct ytm32_module_clock_config {
+struct clock_control_ytm32_module_clock_config {
 	uint32_t clock_id;
 	uint32_t clk_src;
 	uint32_t divider;
 };
 
-static const struct ytm32_module_clock_config ytm32_fixed_module_clocks[] = {
+static const struct clock_control_ytm32_module_clock_config ytm32_fixed_module_clocks[] = {
 	/*
 	 * DMA is bus-clocked infrastructure with no functional clock mux, so the
 	 * SoC dtsi node carries no functional-clock-source property.  It still
@@ -170,7 +170,7 @@ static const struct ytm32_module_clock_config ytm32_fixed_module_clocks[] = {
 		(COND_CODE_1(DT_NODE_HAS_PROP(node_id, ytmicro_functional_clock_source), \
 			(YTM32_DT_FUNCTIONAL_CLOCK_ENTRY(node_id)), ())), ())
 
-static const struct ytm32_module_clock_config ytm32_dts_module_clocks[] = {
+static const struct clock_control_ytm32_module_clock_config ytm32_dts_module_clocks[] = {
 	DT_FOREACH_CHILD_STATUS_OKAY(DT_PATH(soc),
 				     YTM32_APPEND_DTS_CLOCK_IF_HAS_FUNC_SRC)
 };
@@ -178,7 +178,7 @@ static const struct ytm32_module_clock_config ytm32_dts_module_clocks[] = {
 #undef YTM32_APPEND_DTS_CLOCK_IF_HAS_FUNC_SRC
 #undef YTM32_DT_FUNCTIONAL_CLOCK_ENTRY
 
-static const struct ytm32_module_clock_config *ytm32_find_module_clock(uint32_t clock_id)
+static const struct clock_control_ytm32_module_clock_config *ytm32_find_module_clock(uint32_t clock_id)
 {
 	for (size_t i = 0; i < ARRAY_SIZE(ytm32_dts_module_clocks); i++) {
 		if (ytm32_dts_module_clocks[i].clock_id == clock_id) {
@@ -296,7 +296,7 @@ static const char *ytm32_clock_label(uint32_t clock_id)
 	return "unknown";
 }
 
-static bool ytm32_is_supported_module_source(uint32_t clk_src)
+static bool clock_control_ytm32_is_supported_module_source(uint32_t clk_src)
 {
 	switch (clk_src) {
 	case YTM32_CLOCK_SRC_FIRC:
@@ -317,14 +317,14 @@ static bool ytm32_is_supported_module_source(uint32_t clk_src)
 	}
 }
 
-static int ytm32_validate_module_clock(const struct ytm32_module_clock_config *clock_cfg,
+static int clock_control_ytm32_validate_module_clock(const struct clock_control_ytm32_module_clock_config *clock_cfg,
 					       uint32_t clock_id)
 {
 	if (clock_cfg == NULL) {
 		return -EINVAL;
 	}
 
-	if (!ytm32_is_supported_module_source(clock_cfg->clk_src)) {
+	if (!clock_control_ytm32_is_supported_module_source(clock_cfg->clk_src)) {
 		LOG_ERR("Unsupported YTM32 clock source %u for %s (%u)",
 			clock_cfg->clk_src, ytm32_clock_label(clock_id), clock_id);
 		return -EINVAL;
@@ -340,11 +340,11 @@ static int ytm32_validate_module_clock(const struct ytm32_module_clock_config *c
 	return 0;
 }
 
-static int ytm32_log_system_rate(uint32_t clock_id, const char *label)
+static int clock_control_ytm32_log_system_rate(uint32_t clock_id, const char *label)
 {
 	uint32_t rate = 0U;
 	int hal_status = CLOCK_SYS_GetFreq(clock_id, &rate);
-	int ret = ytm32_hal_status_to_errno(hal_status);
+	int ret = clock_control_ytm32_hal_status_to_errno(hal_status);
 
 	if (ret != 0) {
 		LOG_ERR("Failed to query %s rate (HAL status %d)", label, hal_status);
@@ -355,14 +355,14 @@ static int ytm32_log_system_rate(uint32_t clock_id, const char *label)
 	return 0;
 }
 
-static bool ytm32_is_system_clock_id(uint32_t clock_id)
+static bool clock_control_ytm32_is_system_clock_id(uint32_t clock_id)
 {
 	return (clock_id == YTM32_CLOCK_CORE) ||
 	       (clock_id == YTM32_CLOCK_FAST_BUS) ||
 	       (clock_id == YTM32_CLOCK_SLOW_BUS);
 }
 
-static int ytm32_query_clock_rate(uint32_t clock_id, const char *label,
+static int clock_control_ytm32_query_clock_rate(uint32_t clock_id, const char *label,
 				       uint32_t *rate)
 {
 	int hal_status;
@@ -373,7 +373,7 @@ static int ytm32_query_clock_rate(uint32_t clock_id, const char *label,
 	}
 
 	hal_status = CLOCK_SYS_GetFreq(clock_id, rate);
-	ret = ytm32_hal_status_to_errno(hal_status);
+	ret = clock_control_ytm32_hal_status_to_errno(hal_status);
 
 	if (ret != 0) {
 		LOG_ERR("Failed to query %s rate (HAL status %d)", label, hal_status);
@@ -382,8 +382,8 @@ static int ytm32_query_clock_rate(uint32_t clock_id, const char *label,
 	return ret;
 }
 
-static int ytm32_module_clock_request(const struct device *dev, uint32_t clock_id,
-				      const struct ytm32_module_clock_config *clock_cfg,
+static int clock_control_ytm32_module_clock_request(const struct device *dev, uint32_t clock_id,
+				      const struct clock_control_ytm32_module_clock_config *clock_cfg,
 				      bool enable)
 {
 	struct clock_control_ytm32_data *data = dev->data;
@@ -428,7 +428,7 @@ static int ytm32_module_clock_request(const struct device *dev, uint32_t clock_i
 	return 0;
 }
 
-static int ytm32_refresh_system_rates(const struct device *dev)
+static int clock_control_ytm32_refresh_system_rates(const struct device *dev)
 {
 	const struct clock_control_ytm32_config *cfg = dev->config;
 	struct clock_control_ytm32_data *data = dev->data;
@@ -437,19 +437,19 @@ static int ytm32_refresh_system_rates(const struct device *dev)
 	uint32_t expected_slow_rate = expected_fast_rate / soc_clock->slow_bus_divider;
 	int ret;
 
-	ret = ytm32_query_clock_rate(YTM32_CLOCK_CORE, "core",
+	ret = clock_control_ytm32_query_clock_rate(YTM32_CLOCK_CORE, "core",
 				       &data->core_rate);
 	if (ret < 0) {
 		return ret;
 	}
 
-	ret = ytm32_query_clock_rate(YTM32_CLOCK_FAST_BUS, "fast bus",
+	ret = clock_control_ytm32_query_clock_rate(YTM32_CLOCK_FAST_BUS, "fast bus",
 				       &data->fast_bus_rate);
 	if (ret < 0) {
 		return ret;
 	}
 
-	ret = ytm32_query_clock_rate(YTM32_CLOCK_SLOW_BUS, "slow bus",
+	ret = clock_control_ytm32_query_clock_rate(YTM32_CLOCK_SLOW_BUS, "slow bus",
 				       &data->slow_bus_rate);
 	if (ret < 0) {
 		return ret;
@@ -488,7 +488,7 @@ static int ytm32_refresh_system_rates(const struct device *dev)
 static int clock_control_ytm32_on(const struct device *dev, clock_control_subsys_t sys)
 {
 	uint32_t clock_id = (uint32_t)(uintptr_t)sys;
-	const struct ytm32_module_clock_config *clock_cfg;
+	const struct clock_control_ytm32_module_clock_config *clock_cfg;
 	int ret;
 	
 	clock_cfg = ytm32_find_module_clock(clock_id);
@@ -498,7 +498,7 @@ static int clock_control_ytm32_on(const struct device *dev, clock_control_subsys
 		return -ENOTSUP;
 	}
 
-	if (ytm32_validate_module_clock(clock_cfg, clock_id) < 0) {
+	if (clock_control_ytm32_validate_module_clock(clock_cfg, clock_id) < 0) {
 		return -EINVAL;
 	}
 
@@ -506,7 +506,7 @@ static int clock_control_ytm32_on(const struct device *dev, clock_control_subsys
 		ytm32_clock_label(clock_id), clock_id,
 		clock_cfg->clk_src, clock_cfg->divider);
 
-	ret = ytm32_module_clock_request(dev, clock_id, clock_cfg, true);
+	ret = clock_control_ytm32_module_clock_request(dev, clock_id, clock_cfg, true);
 	if (ret < 0) {
 		return ret;
 	}
@@ -517,10 +517,10 @@ static int clock_control_ytm32_on(const struct device *dev, clock_control_subsys
 static int clock_control_ytm32_off(const struct device *dev, clock_control_subsys_t sys)
 {
 	uint32_t clock_id = (uint32_t)(uintptr_t)sys;
-	const struct ytm32_module_clock_config *clock_cfg;
+	const struct clock_control_ytm32_module_clock_config *clock_cfg;
 	int ret;
 
-	if (ytm32_is_system_clock_id(clock_id)) {
+	if (clock_control_ytm32_is_system_clock_id(clock_id)) {
 		LOG_ERR("System clock %s (%u) cannot be gated off",
 			ytm32_clock_label(clock_id), clock_id);
 		return -ENOTSUP;
@@ -533,14 +533,14 @@ static int clock_control_ytm32_off(const struct device *dev, clock_control_subsy
 		return -ENOTSUP;
 	}
 
-	if (ytm32_validate_module_clock(clock_cfg, clock_id) < 0) {
+	if (clock_control_ytm32_validate_module_clock(clock_cfg, clock_id) < 0) {
 		return -EINVAL;
 	}
 
 	LOG_INF("Disable YTM32 clock %s (%u)",
 		ytm32_clock_label(clock_id), clock_id);
 
-	ret = ytm32_module_clock_request(dev, clock_id, clock_cfg, false);
+	ret = clock_control_ytm32_module_clock_request(dev, clock_id, clock_cfg, false);
 	if (ret < 0) {
 		return ret;
 	}
@@ -552,14 +552,14 @@ static int clock_control_ytm32_get_rate(const struct device *dev, clock_control_
 {
 	struct clock_control_ytm32_data *data = dev->data;
 	uint32_t clock_id = (uint32_t)(uintptr_t)sys;
-	const struct ytm32_module_clock_config *clock_cfg;
+	const struct clock_control_ytm32_module_clock_config *clock_cfg;
 	int ret;
 
 	if (rate == NULL) {
 		return -EINVAL;
 	}
 
-	if (ytm32_is_system_clock_id(clock_id)) {
+	if (clock_control_ytm32_is_system_clock_id(clock_id)) {
 		if (!data->system_rates_valid) {
 			return -EIO;
 		}
@@ -588,7 +588,7 @@ static int clock_control_ytm32_get_rate(const struct device *dev, clock_control_
 		return -ENOTSUP;
 	}
 
-	ret = ytm32_query_clock_rate(clock_id, ytm32_clock_label(clock_id), rate);
+	ret = clock_control_ytm32_query_clock_rate(clock_id, ytm32_clock_label(clock_id), rate);
 	if ((ret == 0) && (*rate == 0U)) {
 		/* Fallback for modules lacking IPC clock source selection */
 		uint32_t src_clock_id = 0U;
@@ -609,7 +609,7 @@ static int clock_control_ytm32_get_rate(const struct device *dev, clock_control_
 		}
 
 		if (src_clock_id != 0U) {
-			ret = ytm32_query_clock_rate(src_clock_id, "source_clock", rate);
+			ret = clock_control_ytm32_query_clock_rate(src_clock_id, "source_clock", rate);
 			if (ret == 0) {
 				*rate /= clock_cfg->divider;
 			}
@@ -673,22 +673,22 @@ static int clock_control_ytm32_init(const struct device *dev)
 		LOG_WRN("CMU uses SIRC as reference clock; validate low-power transitions on the target board");
 	}
 
-	ret = ytm32_refresh_system_rates(dev);
+	ret = clock_control_ytm32_refresh_system_rates(dev);
 	if (ret < 0) {
 		return ret;
 	}
 
-	ret = ytm32_log_system_rate(YTM32_CLOCK_CORE, "core");
+	ret = clock_control_ytm32_log_system_rate(YTM32_CLOCK_CORE, "core");
 	if (ret < 0) {
 		return ret;
 	}
 
-	ret = ytm32_log_system_rate(YTM32_CLOCK_FAST_BUS, "fast bus");
+	ret = clock_control_ytm32_log_system_rate(YTM32_CLOCK_FAST_BUS, "fast bus");
 	if (ret < 0) {
 		return ret;
 	}
 
-	ret = ytm32_log_system_rate(YTM32_CLOCK_SLOW_BUS, "slow bus");
+	ret = clock_control_ytm32_log_system_rate(YTM32_CLOCK_SLOW_BUS, "slow bus");
 	if (ret < 0) {
 		return ret;
 	}

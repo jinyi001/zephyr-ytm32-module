@@ -8,7 +8,7 @@
  * one trigger source.  This driver:
  *   - owns the TMU peripheral clock (enabled via clock_control at init),
  *   - applies the static routes described as devicetree child nodes,
- *   - exposes ytm32_tmu_route() for dynamic routing at runtime.
+ *   - exposes tmu_ytm32_route() for dynamic routing at runtime.
  *
  * It deliberately does NOT invent a generic Zephyr "trigger-mux" device class
  * (Zephyr has none): it is a small project-internal device with a single
@@ -30,7 +30,7 @@
 
 LOG_MODULE_REGISTER(tmu_ytm32, CONFIG_YTM32_TMU_LOG_LEVEL);
 
-struct ytm32_tmu_config {
+struct tmu_ytm32_config {
 	uint8_t instance;
 	const struct device *clk_dev;
 	clock_control_subsys_t clk_sys;
@@ -38,9 +38,9 @@ struct ytm32_tmu_config {
 	uint8_t num_routes;
 };
 
-int ytm32_tmu_route(const struct device *dev, uint32_t source, uint32_t target)
+int tmu_ytm32_route(const struct device *dev, uint32_t source, uint32_t target)
 {
-	const struct ytm32_tmu_config *cfg = dev->config;
+	const struct tmu_ytm32_config *cfg = dev->config;
 	status_t s;
 
 	s = TMU_DRV_SetTrigSourceForTargetModule(cfg->instance,
@@ -55,17 +55,17 @@ int ytm32_tmu_route(const struct device *dev, uint32_t source, uint32_t target)
 	return 0;
 }
 
-uint32_t ytm32_tmu_get_route(const struct device *dev, uint32_t target)
+uint32_t tmu_ytm32_get_route(const struct device *dev, uint32_t target)
 {
-	const struct ytm32_tmu_config *cfg = dev->config;
+	const struct tmu_ytm32_config *cfg = dev->config;
 
 	return (uint32_t)TMU_DRV_GetTrigSourceForTargetModule(
 			cfg->instance, (tmu_target_module_t)target);
 }
 
-static int ytm32_tmu_init(const struct device *dev)
+static int tmu_ytm32_init(const struct device *dev)
 {
-	const struct ytm32_tmu_config *cfg = dev->config;
+	const struct tmu_ytm32_config *cfg = dev->config;
 	tmu_user_config_t uc = {
 		.numInOutMappingConfigs = cfg->num_routes,
 		.inOutMappingConfig     = cfg->routes,
@@ -106,7 +106,7 @@ static int ytm32_tmu_init(const struct device *dev)
 		DT_INST_FOREACH_CHILD_STATUS_OKAY(inst, TMU_ROUTE_ENTRY)	\
 	};								\
 									\
-	static const struct ytm32_tmu_config tmu_ytm32_config_##inst = {\
+	static const struct tmu_ytm32_config tmu_ytm32_config_##inst = {\
 		/* Single TMU peripheral on this SoC: HAL instance 0. */\
 		.instance   = 0U,					\
 		.clk_dev    = DEVICE_DT_GET(DT_INST_CLOCKS_CTLR(inst)),	\
@@ -117,7 +117,7 @@ static int ytm32_tmu_init(const struct device *dev)
 	};								\
 									\
 	DEVICE_DT_INST_DEFINE(inst,					\
-			      ytm32_tmu_init,				\
+			      tmu_ytm32_init,				\
 			      NULL,					\
 			      NULL,					\
 			      &tmu_ytm32_config_##inst,			\
