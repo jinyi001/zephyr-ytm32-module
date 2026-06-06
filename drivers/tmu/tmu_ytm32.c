@@ -8,7 +8,7 @@
  * one trigger source.  This driver:
  *   - owns the TMU peripheral clock (enabled via clock_control at init),
  *   - applies the static routes described as devicetree child nodes,
- *   - exposes tmu_ytm32_route() for dynamic routing at runtime.
+ *   - exposes ytm32_tmu_route() for dynamic routing at runtime.
  *
  * It deliberately does NOT invent a generic Zephyr "trigger-mux" device class
  * (Zephyr has none): it is a small project-internal device with a single
@@ -38,7 +38,7 @@ struct tmu_ytm32_config {
 	uint8_t num_routes;
 };
 
-int tmu_ytm32_route(const struct device *dev, uint32_t source, uint32_t target)
+int ytm32_tmu_route(const struct device *dev, uint32_t source, uint32_t target)
 {
 	const struct tmu_ytm32_config *cfg = dev->config;
 	status_t s;
@@ -55,7 +55,7 @@ int tmu_ytm32_route(const struct device *dev, uint32_t source, uint32_t target)
 	return 0;
 }
 
-uint32_t tmu_ytm32_get_route(const struct device *dev, uint32_t target)
+uint32_t ytm32_tmu_get_route(const struct device *dev, uint32_t target)
 {
 	const struct tmu_ytm32_config *cfg = dev->config;
 
