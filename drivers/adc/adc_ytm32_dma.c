@@ -21,6 +21,7 @@
 #include <zephyr/device.h>
 #include <zephyr/drivers/clock_control.h>
 #include <zephyr/drivers/clock_control/ytm32_soc_clock.h>
+#include <zephyr/drivers/dma/ytm32_dma_zli_timing.h>
 #include <zephyr/irq.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
@@ -43,6 +44,8 @@ void adc_ytm32_dma_notify_isr(const struct device *dev)
 {
 	struct adc_ytm32_shared *st = adc_ytm32_shared(dev);
 
+	ytm32_dma_zli_timing_mark(YTM32_DMA_ZLI_TIMING_NOTIFY_ISR_ENTRY);
+
 	if (st->dma_error != 0) {
 		LOG_ERR("DMA error %d", st->dma_error);
 		st->dma_error = 0;
@@ -51,10 +54,12 @@ void adc_ytm32_dma_notify_isr(const struct device *dev)
 	}
 
 	if (st->dma_cfg.cb != NULL) {
+		ytm32_dma_zli_timing_mark(YTM32_DMA_ZLI_TIMING_NOTIFY_CB_BEGIN);
 		st->dma_cfg.cb(dev, st->dma_cfg.buf,
 			       st->channel_count,
 			       st->dma_cfg.depth,
 			       st->dma_cfg.user_data);
+		ytm32_dma_zli_timing_mark(YTM32_DMA_ZLI_TIMING_NOTIFY_CB_END);
 	}
 }
 
@@ -108,6 +113,8 @@ static void adc_ytm32_dma_cb(void *user_data, int hal_status)
 	struct adc_ytm32_shared *st = adc_ytm32_shared(dev);
 	const struct adc_ytm32_config *config = dev->config;
 
+	ytm32_dma_zli_timing_mark(YTM32_DMA_ZLI_TIMING_ADC_DMA_CB_ENTRY);
+
 	if (!st->dma_active) {
 		return;
 	}
@@ -121,6 +128,7 @@ static void adc_ytm32_dma_cb(void *user_data, int hal_status)
 		st->dma_active = false;
 		ADC_DRV_Stop(config->instance);
 		NVIC_SetPendingIRQ(config->irq);
+		ytm32_dma_zli_timing_mark(YTM32_DMA_ZLI_TIMING_ADC_DMA_CB_EXIT);
 		return;
 	}
 
@@ -128,17 +136,21 @@ static void adc_ytm32_dma_cb(void *user_data, int hal_status)
 	 * continuous mode the ADC keeps generating DMA requests; without this stop the
 	 * DMA can auto-restart and re-enter the ISR before the waiting thread resumes.
 	 */
+	ytm32_dma_zli_timing_mark(YTM32_DMA_ZLI_TIMING_DMA_STOP_BEGIN);
 	ytm32_dma_hal_stop(config->dma_channel);
+	ytm32_dma_zli_timing_mark(YTM32_DMA_ZLI_TIMING_DMA_STOP_END);
 
 	/* Call the zero-latency-safe callback from the DMA top-half.  This callback
 	 * must not use Zephyr kernel APIs; it is for register reads/writes or other
 	 * bounded latency-sensitive work only.
 	 */
 	if (st->dma_cfg.zl_cb != NULL) {
+		ytm32_dma_zli_timing_mark(YTM32_DMA_ZLI_TIMING_ZL_CB_BEGIN);
 		st->dma_cfg.zl_cb(dev, st->dma_cfg.buf,
 				  st->channel_count,
 				  st->dma_cfg.depth,
 				  st->dma_cfg.user_data);
+		ytm32_dma_zli_timing_mark(YTM32_DMA_ZLI_TIMING_ZL_CB_END);
 	}
 
 	/* Defer the normal callback to a regular-priority software IRQ so callers may
@@ -146,8 +158,11 @@ static void adc_ytm32_dma_cb(void *user_data, int hal_status)
 	 * later connected as a zero-latency direct interrupt.
 	 */
 	if (st->dma_cfg.cb != NULL) {
+		ytm32_dma_zli_timing_mark(YTM32_DMA_ZLI_TIMING_NVIC_PEND_BEGIN);
 		NVIC_SetPendingIRQ(config->irq);
+		ytm32_dma_zli_timing_mark(YTM32_DMA_ZLI_TIMING_NVIC_PEND_END);
 	}
+	ytm32_dma_zli_timing_mark(YTM32_DMA_ZLI_TIMING_ADC_DMA_CB_EXIT);
 }
 
 /* ──────────────────────── internal helpers ─────────────────── */

@@ -14,3 +14,11 @@ config DMA_YTM32_CH8_ZERO_LATENCY
 	help
 	  Connect DMA8_IRQn with IRQ_DIRECT_CONNECT and IRQ_ZERO_LATENCY for the
 	  ADC DMA motor-control path. Other DMA channels remain normal Zephyr IRQs.
+
+config DMA_YTM32_CH8_ZLI_TIMING
+	bool "Instrument DMA channel 8 zero-latency interrupt timing"
+	depends on DMA_YTM32_CH8_ZERO_LATENCY
+	help
+	  Use DWT->CYCCNT to timestamp the ADC DMA channel 8 zero-latency
+	  interrupt path. Intended for trigger_chain timing validation only.
+	  Requires CMSIS DWT/CoreDebug headers (provided by the vendor HAL).

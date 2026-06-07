@@ -21,6 +21,8 @@
 #include "dma_irq.h"
 #undef dma_callback_t
 
+#include <zephyr/drivers/dma/ytm32_dma_zli_timing.h>
+
 #include "ytm32_dma_hal.h"
 
 /* ──────────────────────── module-level state ──────────────────────── */
@@ -56,8 +58,14 @@ static void dma_bridge_cb(void *param, dma_chn_status_t hal_status)
 	uint8_t ch = (uint8_t)(uintptr_t)param;
 	int status = (hal_status == DMA_CHN_NORMAL) ? 0 : -EIO;
 
+	if (ch == 8U) {
+		ytm32_dma_zli_timing_mark(YTM32_DMA_ZLI_TIMING_VENDOR_BRIDGE_ENTRY);
+	}
 	if (ch < FEATURE_DMA_VIRTUAL_CHANNELS && s_ctx[ch].cb) {
 		s_ctx[ch].cb(s_ctx[ch].user_data, status);
+	}
+	if (ch == 8U) {
+		ytm32_dma_zli_timing_mark(YTM32_DMA_ZLI_TIMING_VENDOR_BRIDGE_EXIT);
 	}
 }
 
@@ -282,7 +290,13 @@ bool ytm32_dma_hal_error(uint8_t ch)
 
 void ytm32_dma_hal_irq(uint8_t ch)
 {
+	if (ch == 8U) {
+		ytm32_dma_zli_timing_mark(YTM32_DMA_ZLI_TIMING_HAL_IRQ_ENTRY);
+	}
 	DMA_DRV_IRQHandler(ch);
+	if (ch == 8U) {
+		ytm32_dma_zli_timing_mark(YTM32_DMA_ZLI_TIMING_HAL_IRQ_EXIT);
+	}
 }
 
 void ytm32_dma_hal_error_irq(void)

@@ -10,6 +10,7 @@
 #include <zephyr/device.h>
 #include <zephyr/drivers/clock_control.h>
 #include <zephyr/drivers/dma.h>
+#include <zephyr/drivers/dma/ytm32_dma_zli_timing.h>
 #include <zephyr/kernel.h>
 #include <zephyr/irq.h>
 #include <zephyr/logging/log.h>
@@ -65,8 +66,14 @@ static void dma_ytm32_hal_cb(void *user_data, int hal_status)
 	struct ytm32_dma_data *data = dev->data;
 	struct ytm32_dma_chan *chan = &data->chan[ctx->idx];
 
+	if (ctx->idx == 8U) {
+		ytm32_dma_zli_timing_mark(YTM32_DMA_ZLI_TIMING_ZEPHYR_DMA_CB_ENTRY);
+	}
 	if (chan->zephyr_cb) {
 		chan->zephyr_cb(dev, chan->zephyr_cb_data, ctx->idx, hal_status);
+	}
+	if (ctx->idx == 8U) {
+		ytm32_dma_zli_timing_mark(YTM32_DMA_ZLI_TIMING_ZEPHYR_DMA_CB_EXIT);
 	}
 }
 
@@ -84,7 +91,9 @@ static void dma_ytm32_chan_irq(const void *arg)
 #if defined(CONFIG_DMA_YTM32_CH8_ZERO_LATENCY)
 ISR_DIRECT_DECLARE(dma_ytm32_ch8_zli_isr)
 {
+	ytm32_dma_zli_timing_mark(YTM32_DMA_ZLI_TIMING_IRQ_ENTRY);
 	ytm32_dma_hal_irq(8U);
+	ytm32_dma_zli_timing_mark(YTM32_DMA_ZLI_TIMING_IRQ_EXIT);
 	return 0;
 }
 #endif
