@@ -315,6 +315,7 @@ int adc_ytm32_dma_start(const struct device *dev,
 	conv.sequenceConfig.sequenceIntEnable = false;
 	conv.sequenceConfig.ovrunIntEnable    = false;
 	conv.sampleTime   = max_smp;
+	conv.startTime    = config->adc_start_time;
 	/* ADC module internal clock divider (CFG1.PRS = ytmicro,adc-clock-divider).
 	 * Separate from the IPC clock tree divider (ytmicro,functional-clock-divider).
 	 * Vendor HAL semantics are n+1, not 2^n:

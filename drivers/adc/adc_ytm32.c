@@ -273,6 +273,7 @@ static void adc_context_start_sampling(struct adc_context *ctx)
 	conv.sequenceConfig.sequenceIntEnable = true;
 	conv.sequenceConfig.ovrunIntEnable    = true;
 	conv.sampleTime   = max_smp;
+	conv.startTime    = config->adc_start_time;
 	/* ADC module internal clock divider (CFG1.PRS = ytmicro,adc-clock-divider).
 	 * Separate from the IPC clock tree divider (ytmicro,functional-clock-divider).
 	 * Vendor HAL semantics are n+1, not 2^n:
@@ -451,6 +452,8 @@ static DEVICE_API(adc, adc_ytm32_driver_api) = {
 				DT_INST_CLOCKS_CELL(inst, id),			\
 		.adc_clk_div  = DT_INST_PROP(inst,				\
 				ytmicro_adc_clock_divider),			\
+		.adc_start_time = DT_INST_PROP(inst,				\
+				ytmicro_adc_start_time),			\
 		.pincfg       = PINCTRL_DT_INST_DEV_CONFIG_GET(inst),		\
 		.irq_config_func = adc_ytm32_irq_config_##inst,			\
 		.dma_dev      = YTM32_ADC_DMA_DEV(inst),			\

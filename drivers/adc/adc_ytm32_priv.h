@@ -49,6 +49,7 @@ struct adc_ytm32_config {
 	const struct device             *clock_dev;
 	clock_control_subsys_t           clock_subsys;
 	uint32_t                         adc_clk_div; /* CFG1.PRS — ADC internal divider */
+	uint32_t                         adc_start_time; /* CFG1.STCNT — ADC startup ticks */
 	const struct pinctrl_dev_config *pincfg;
 	void (*irq_config_func)(void);
 	IRQn_Type                         irq;

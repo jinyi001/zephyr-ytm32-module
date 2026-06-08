@@ -32,6 +32,20 @@ properties:
       This is separate from the ADC module's internal clock divider
       (ytmicro,adc-clock-divider), which further divides the IPC clock.
 
+
+  ytmicro,adc-start-time:
+    type: int
+    required: false
+    default: 32
+    description: |
+      ADC startup time register field (CFG1.STCNT), in ADC clock ticks.
+      The vendor HAL writes this value directly via ADC_SetStartTime(); actual
+      startup delay is (adc-start-time + 1) / FADC.
+
+      Keep this consistent with FADC when changing ytmicro,adc-clock-divider:
+        FADC=16 MHz  -> default 32 gives 33/16MHz = 2.06 us
+        FADC=32 MHz  -> use at least 63 for 64/32MHz = 2.00 us
+
   ytmicro,adc-clock-divider:
     type: int
     required: false
