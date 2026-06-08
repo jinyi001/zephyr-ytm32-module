@@ -99,7 +99,12 @@ uint8_t adc_ytm32_channels_to_sequence(uint32_t channels_mask,
 				       uint8_t *max_smp_out)
 {
 	uint8_t slot = 0;
-	uint8_t max_smp = ADC_DEFAULT_SAMPLE_TIME;
+	/* Use the maximum among the selected channels exactly as configured.
+	 * channel_setup(ADC_ACQ_TIME_DEFAULT) stores ADC_DEFAULT_SAMPLE_TIME in
+	 * sample_times[ch], so initializing this to the default here would silently
+	 * clamp any explicit smaller SMP (for example stage8's SMP=4) back to 12.
+	 */
+	uint8_t max_smp = 0U;
 
 	for (uint8_t ch = 0;
 	     channels_mask != 0U && slot < ADC_CHSEL_COUNT;
@@ -270,8 +275,9 @@ static void adc_context_start_sampling(struct adc_context *ctx)
 	conv.sampleTime   = max_smp;
 	/* ADC module internal clock divider (CFG1.PRS = ytmicro,adc-clock-divider).
 	 * Separate from the IPC clock tree divider (ytmicro,functional-clock-divider).
-	 * Encoding: 0=÷1, 1=÷2, 2=÷4 (default), 3=÷8.
-	 * With IPC = FIRC/6 = 16 MHz and default PRS=2: ADC core = 4 MHz (within 2–32 MHz).
+	 * Vendor HAL semantics are n+1, not 2^n:
+	 *   FADC = func_clk / (CFG1.PRS + 1).
+	 * Runtime assertion in ADC_DRV_ConfigConverter() requires FADC in [2, 32] MHz.
 	 */
 	conv.clockDivider = (adc_clk_divide_t)config->adc_clk_div;
 	conv.resolution   = adc_ytm32_bits_to_resolution(ctx->sequence.resolution);

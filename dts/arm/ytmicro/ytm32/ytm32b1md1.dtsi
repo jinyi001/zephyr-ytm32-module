@@ -171,12 +171,15 @@
 			clocks = <&cgu YTM32_CLOCK_ADC0>;
 			/* IPC clock: FIRC (96 MHz) / 6 = 16 MHz (crystal-independent).
 			 * ADC internal divider (ytmicro,adc-clock-divider = 2 by default):
-			 *   CFG1.PRS = 2 → divide by 4 → ADC core = 4 MHz.
-			 * RM §30.1: ADC clock valid range 2–32 MHz.
+			 *   CFG1.PRS = 2 → divide by 3 (n+1 semantics) → FADC = 5.33 MHz.
+			 * Driver runtime assertion: FADC must be in [2, 32] MHz.
+			 * Factory frontend (sdk.json adc_func_clk): func_clk in [4, 32] MHz.
+			 * Datasheet DS v1.8 §6.4.5: FADC spec max 2 MHz.
+			 * The SDK default (5.33 MHz) is the factory-intended configuration.
 			 */
 			ytmicro,functional-clock-source = <YTM32_CLOCK_SRC_FIRC>;
 			ytmicro,functional-clock-divider = <6>;
-			/* ytmicro,adc-clock-divider = <2> is the binding default (÷4). */
+			/* ytmicro,adc-clock-divider = <2> is the binding default (÷3, n+1). */
 			#io-channel-cells = <1>;
 			status = "disabled";
 			/* DMA channel, hw-trigger-source, tmu, and cim-trigger-select

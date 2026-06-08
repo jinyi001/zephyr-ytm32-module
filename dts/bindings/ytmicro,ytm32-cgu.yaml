@@ -35,7 +35,7 @@ properties:
       System clock source selector.  Use YTM32_SYSTEM_CLOCK_SRC_* values.
         0 = FIRC   (default after reset)
         1 = FXOSC  (requires fxosc-frequency in board DTS)
-        2 = PLL    (requires pll configuration, not yet supported)
+        2 = PLL    (requires the pll-* properties below)
 
   fxosc-frequency:
     type: int
@@ -62,12 +62,45 @@ properties:
     description: |
       FXOSC gain selection value passed to the vendor SCU configuration.
 
+  pll-reference-clock:
+    type: int
+    required: false
+    default: 0
+    description: |
+      PLL reference clock source, used only when system-clock-source is PLL.
+      Use YTM32_PLL_REF_* values (scu_pll_ref_clk_t):
+        0 = FXOSC  (requires fxosc-frequency; the usual crystal-accurate path)
+        1 = FIRC
+      The PLL input frequency finput = <reference-freq> / pll-reference-divider
+      must stay within 8–40 MHz (RM §12.1; host tool clock.ts enforces 8–48 MHz).
+
+  pll-feedback-divider:
+    type: int
+    required: false
+    description: |
+      PLL feedback divider (Ndiv / FBDIV), used only when system-clock-source
+      is PLL.  Valid range 10–63 (host tool clock.ts).  The PLL output is:
+        pll-out = (<reference-freq> / pll-reference-divider) * pll-feedback-divider / 2
+      and must land in 100–200 MHz.  The driver enforces all of these with
+      BUILD_ASSERT at compile time.
+
+  pll-reference-divider:
+    type: int
+    required: false
+    default: 1
+    description: |
+      PLL reference (pre-)divider (Npre / REFDIV), used only when
+      system-clock-source is PLL.  Valid range 1 or 3–16 (value 2 is not
+      supported by the hardware, per host tool clock.ts).
+
   core-clock:
     type: int
     required: true
     description: |
       Core (CPU / SysTick) clock frequency in Hz after all dividers.
-      Derived value: core-clock = <source-freq> / core-divider.
+      Derived value: core-clock = <source-freq> / core-divider, where
+      <source-freq> is FIRC, FXOSC, or the PLL output depending on
+      system-clock-source.
       A BUILD_ASSERT in the clock driver checks this identity at compile
       time to catch copy-paste errors.  CONFIG_SYS_CLOCK_HW_CYCLES_PER_SEC
       is auto-derived from this property via Kconfig dt_node_int_prop_int.

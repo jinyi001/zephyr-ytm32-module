@@ -85,4 +85,8 @@
 #define YTM32_SYSTEM_CLOCK_SRC_FXOSC     1U
 #define YTM32_SYSTEM_CLOCK_SRC_PLL       2U
 
+/* PLL reference clock select — matches vendor scu_pll_ref_clk_t */
+#define YTM32_PLL_REF_FXOSC              0U
+#define YTM32_PLL_REF_FIRC               1U
+
 #endif /* ZEPHYR_INCLUDE_DT_BINDINGS_CLOCK_YTM32B1MD1_CLOCK_H_ */

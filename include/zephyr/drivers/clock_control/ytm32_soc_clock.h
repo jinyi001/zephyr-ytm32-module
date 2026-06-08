@@ -29,6 +29,10 @@ struct ytm32_soc_clock_config {
 	uint32_t fxosc_frequency;
 	bool fxosc_bypass;
 	uint8_t fxosc_gain_selection;
+	/* PLL configuration — only consulted when system_clock_source is PLL. */
+	uint32_t pll_reference_clock;	/* YTM32_PLL_REF_* (FXOSC / FIRC)        */
+	uint32_t pll_feedback_divider;	/* Ndiv / FBDIV, valid 10–63             */
+	uint32_t pll_reference_divider;	/* Npre / REFDIV, valid 1 or 3–16        */
 	uint32_t core_clock;
 	uint32_t core_divider;
 	uint32_t fast_bus_divider;

@@ -30,6 +30,7 @@
 #include "device_registers.h"
 #include "adc_driver.h"
 #include "../dma/ytm32_dma_hal.h"
+#include "../dma/ytm32_dma_hal_fast.h"
 #include <zephyr/drivers/misc/ytm32_tmu.h>
 #include <zephyr/dt-bindings/tmu/ytm32b1md1-tmu.h>
 #include <zephyr/dt-bindings/clock/ytmicro,ytm32b1md1-clock.h>
@@ -132,13 +133,17 @@ static void adc_ytm32_dma_cb(void *user_data, int hal_status)
 		return;
 	}
 
-	/* Stop DMA immediately after the batch, before any user callback runs.  In
-	 * continuous mode the ADC keeps generating DMA requests; without this stop the
-	 * DMA can auto-restart and re-enter the ISR before the waiting thread resumes.
+	/* Hardware-triggered mode uses RAM-reload DMA: the channel auto-restarts
+	 * from its internal descriptor after each batch.  No stop needed — the
+	 * DMA is already armed for the next hardware trigger by the time the
+	 * ISR returns.  Software-triggered continuous mode still needs the stop
+	 * to prevent re-entrancy before the thread calls resume.
 	 */
-	ytm32_dma_zli_timing_mark(YTM32_DMA_ZLI_TIMING_DMA_STOP_BEGIN);
-	ytm32_dma_hal_stop(config->dma_channel);
-	ytm32_dma_zli_timing_mark(YTM32_DMA_ZLI_TIMING_DMA_STOP_END);
+	if (st->dma_cfg.trigger != ADC_YTM32_DMA_TRIGGER_HARDWARE) {
+		ytm32_dma_zli_timing_mark(YTM32_DMA_ZLI_TIMING_DMA_STOP_BEGIN);
+		ytm32_dma_hal_stop_ch_inline(config->dma_channel);
+		ytm32_dma_zli_timing_mark(YTM32_DMA_ZLI_TIMING_DMA_STOP_END);
+	}
 
 	/* Call the zero-latency-safe callback from the DMA top-half.  This callback
 	 * must not use Zephyr kernel APIs; it is for register reads/writes or other
@@ -261,16 +266,34 @@ int adc_ytm32_dma_start(const struct device *dev,
 	 */
 	uintptr_t fifo_addr = (uintptr_t)&((ADC_Type *)config->base)->FIFO;
 
-	ret = ytm32_dma_hal_channel_config_loop(
-		config->dma_channel,
-		config->dma_slot,
-		fifo_addr,
-		(uintptr_t)cfg->buf,
-		sizeof(uint16_t),
-		ch_count,
-		cfg->depth,
-		adc_ytm32_dma_cb,
-		(void *)dev);
+	/* Hardware-triggered mode: use RAM-reload so the DMA channel auto-restarts
+	 * after each batch.  The ISR no longer needs to stop/resume the channel,
+	 * saving ~30 cycles per trigger and eliminating the thread-side resume.
+	 * Software-triggered mode still uses plain loop (stop+resume per batch).
+	 */
+	if (hw_trig) {
+		ret = ytm32_dma_hal_channel_config_loop_reload(
+			config->dma_channel,
+			config->dma_slot,
+			fifo_addr,
+			(uintptr_t)cfg->buf,
+			sizeof(uint16_t),
+			ch_count,
+			cfg->depth,
+			adc_ytm32_dma_cb,
+			(void *)dev);
+	} else {
+		ret = ytm32_dma_hal_channel_config_loop(
+			config->dma_channel,
+			config->dma_slot,
+			fifo_addr,
+			(uintptr_t)cfg->buf,
+			sizeof(uint16_t),
+			ch_count,
+			cfg->depth,
+			adc_ytm32_dma_cb,
+			(void *)dev);
+	}
 	if (ret < 0) {
 		LOG_ERR("DMA loop config failed: %d", ret);
 		return ret;
@@ -294,8 +317,9 @@ int adc_ytm32_dma_start(const struct device *dev,
 	conv.sampleTime   = max_smp;
 	/* ADC module internal clock divider (CFG1.PRS = ytmicro,adc-clock-divider).
 	 * Separate from the IPC clock tree divider (ytmicro,functional-clock-divider).
-	 * Encoding: 0=÷1, 1=÷2, 2=÷4 (default), 3=÷8.
-	 * With IPC = FIRC/6 = 16 MHz and default PRS=2: ADC core = 4 MHz (within 2–32 MHz).
+	 * Vendor HAL semantics are n+1, not 2^n:
+	 *   FADC = func_clk / (CFG1.PRS + 1).
+	 * Runtime assertion in ADC_DRV_ConfigConverter() requires FADC in [2, 32] MHz.
 	 */
 	conv.clockDivider = (adc_clk_divide_t)config->adc_clk_div;
 	conv.resolution   = adc_ytm32_bits_to_resolution(cfg->resolution);
@@ -314,6 +338,16 @@ int adc_ytm32_dma_start(const struct device *dev,
 	 * stale start state, then assert ADSTART so TMU/eTMR trigger edges are
 	 * accepted.
 	 */
+
+#if defined(CONFIG_DMA_YTM32_CH8_ZERO_LATENCY)
+	/* Register fast callback: ZLI ISR will call adc_ytm32_dma_cb directly,
+	 * bypassing vendor DMA_DRV_IRQHandler + bridge layers.
+	 */
+	if (config->dma_channel == 8U) {
+		dma_ytm32_ch8_set_zli_cb(adc_ytm32_dma_cb, (void *)dev);
+	}
+#endif
+
 	ret = ytm32_dma_hal_start(config->dma_channel);
 	if (ret < 0) {
 		return ret;
@@ -323,12 +357,28 @@ int adc_ytm32_dma_start(const struct device *dev,
 	if (hw_trig) {
 		/* On MD1 the hardware-trigger gate only arms reliably when ADSTART
 		 * is asserted after ADRDY.  Enable first, poll ready, then arm.
+		 *
+		 * Errata E600006: if an external (TMU/eTMR) trigger arrives while
+		 * ADEN=1 but ADRDY=0, the ADC locks up and silently stops converting.
+		 * So ADRDY readiness must be *confirmed* before arming — if it never
+		 * comes up, fail loudly with -EIO instead of arming a not-ready ADC
+		 * (which previously manifested as a stuck DMA / invalid ZLI snapshot).
 		 */
 		ADC_DRV_Enable(config->instance);
-		for (uint32_t i = 0; i < 10000U; i++) {
+		bool adc_ready = false;
+		for (uint32_t i = 0; i < 100000U; i++) {
 			if (ADC_DRV_GetReadyFlag(config->instance)) {
+				adc_ready = true;
 				break;
 			}
+		}
+		if (!adc_ready) {
+			LOG_ERR("ADC ADRDY never set (E600006 lockup risk); aborting");
+			st->dma_active = false;
+			ADC_DRV_Disable(config->instance);
+			ytm32_dma_hal_stop(config->dma_channel);
+			ytm32_dma_hal_channel_release(config->dma_channel);
+			return -EIO;
 		}
 		ret = adc_ytm32_arm_hw_trigger(dev);
 		if (ret < 0) {
@@ -357,6 +407,11 @@ int adc_ytm32_dma_stop(const struct device *dev)
 	ADC_DRV_Stop(config->instance);
 	ADC_DRV_Disable(config->instance);
 	ytm32_dma_hal_stop(config->dma_channel);
+#if defined(CONFIG_DMA_YTM32_CH8_ZERO_LATENCY)
+	if (config->dma_channel == 8U) {
+		dma_ytm32_ch8_set_zli_cb(NULL, NULL);
+	}
+#endif
 	ytm32_dma_hal_channel_release(config->dma_channel);
 
 	return 0;
@@ -369,6 +424,14 @@ int adc_ytm32_dma_resume(const struct device *dev)
 
 	if (!st->dma_active) {
 		return -EINVAL;
+	}
+
+	/* Hardware-triggered mode with RAM-reload: DMA auto-restarts from its
+	 * internal descriptor after each batch.  No stop/resume needed — the
+	 * channel is already armed for the next hardware trigger.
+	 */
+	if (st->dma_cfg.trigger == ADC_YTM32_DMA_TRIGGER_HARDWARE) {
+		return 0;
 	}
 
 	/* Stop ADC to prevent FIFO overflow while DMA is being re-armed. */

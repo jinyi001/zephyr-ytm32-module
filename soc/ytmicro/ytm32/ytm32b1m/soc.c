@@ -34,6 +34,12 @@
  *   FIRC compareLow  = ( 60 * 128) / 2 = 3840   -> alarm below 60 MHz
  *   FXOSC compareHigh = (30 * 128) / 2 = 1920   -> allow up to 30 MHz
  *   FXOSC compareLow  = (18 * 128) / 2 = 1152   -> alarm below 18 MHz
+ *   PLL  compareHigh = (150 * 128) / 2 = 9600   -> allow up to 150 MHz
+ *   PLL  compareLow  = ( 90 * 128) / 2 = 5760   -> alarm below  90 MHz
+ *
+ * The PLL channel only exists when the SoC supports PLL; it is monitored
+ * only when the PLL is actually used as the system clock source (otherwise
+ * the channel stays disabled and the compare values are inert).
  */
 static const cmu_config_t ytm32_cmu_config = {
 	.fircClockMonitor = {
@@ -43,6 +49,15 @@ static const cmu_config_t ytm32_cmu_config = {
 		.compareHigh = (100U * 128U) / 2U,
 		.compareLow = (60U * 128U) / 2U,
 	},
+#if defined(FEATURE_SCU_SUPPORT_PLL) && FEATURE_SCU_SUPPORT_PLL
+	.pllClockMonitor = {
+		.enable = YTM32_CMU_ENABLED,
+		.resetEnable = YTM32_CMU_RESET_ENABLED,
+		.refClock = CMU_REF_SIRC_CLOCK,
+		.compareHigh = (150U * 128U) / 2U,
+		.compareLow = (90U * 128U) / 2U,
+	},
+#endif /* FEATURE_SCU_SUPPORT_PLL */
 	.fxoscClockMonitor = {
 		.enable = YTM32_CMU_ENABLED,
 		.resetEnable = YTM32_CMU_RESET_ENABLED,
@@ -61,6 +76,23 @@ static bool ytm32_divider_to_sys_div(uint32_t divider, uint8_t *sys_div)
 	*sys_div = (uint8_t)(divider - 1U);
 	return true;
 }
+
+#if defined(FEATURE_SCU_SUPPORT_PLL) && FEATURE_SCU_SUPPORT_PLL
+/*
+ * PLL output frequency, matching the vendor CLOCK_DRV_GetPllFreq() math:
+ *   pll-out = (ref_hz / refdiv) * fbdiv / 2
+ * where ref_hz is FXOSC or FIRC depending on pll_reference_clock.
+ */
+static uint32_t ytm32_pll_output_hz(const struct ytm32_soc_clock_config *cfg)
+{
+	uint32_t ref_hz = (cfg->pll_reference_clock == YTM32_PLL_REF_FIRC)
+				  ? YTM32_FIRC_HZ
+				  : cfg->fxosc_frequency;
+
+	return ((ref_hz / cfg->pll_reference_divider) *
+		cfg->pll_feedback_divider) / 2U;
+}
+#endif /* FEATURE_SCU_SUPPORT_PLL */
 
 static int ytm32_system_clock_source_hz(const struct ytm32_soc_clock_config *cfg,
 					 uint32_t *source_hz,
@@ -82,8 +114,20 @@ static int ytm32_system_clock_source_hz(const struct ytm32_soc_clock_config *cfg
 		*source_hz = cfg->fxosc_frequency;
 		*scu_source = SCU_SYSTEM_CLOCK_SRC_FXOSC;
 		return 0;
+#if defined(FEATURE_SCU_SUPPORT_PLL) && FEATURE_SCU_SUPPORT_PLL
 	case YTM32_SYSTEM_CLOCK_SRC_PLL:
-		return -ENOTSUP;
+		if ((cfg->pll_reference_divider == 0U) ||
+		    (cfg->pll_feedback_divider == 0U)) {
+			return -EINVAL;
+		}
+		if ((cfg->pll_reference_clock == YTM32_PLL_REF_FXOSC) &&
+		    (cfg->fxosc_frequency == 0U)) {
+			return -EINVAL;
+		}
+		*source_hz = ytm32_pll_output_hz(cfg);
+		*scu_source = SCU_SYSTEM_CLOCK_SRC_PLL;
+		return 0;
+#endif /* FEATURE_SCU_SUPPORT_PLL */
 	default:
 		return -EINVAL;
 	}
@@ -166,10 +210,30 @@ int ytm32_soc_apply_clock_config(const struct ytm32_soc_clock_config *cfg)
 	}
 
 	scu_config.sysClkSrc = scu_source;
-	scu_config.fxoscConfig.enable = (cfg->system_clock_source != YTM32_SYSTEM_CLOCK_SRC_FIRC);
+	/*
+	 * FXOSC must be enabled when it is the system clock source, or when it
+	 * is the PLL reference.  Enabling it spuriously (no crystal) makes the
+	 * vendor HAL block on CLOCK_SYS_WaitFXOSCValid() and silently stay on
+	 * SIRC, so keep this condition tight.
+	 */
+	scu_config.fxoscConfig.enable =
+		(cfg->system_clock_source == YTM32_SYSTEM_CLOCK_SRC_FXOSC) ||
+		((cfg->system_clock_source == YTM32_SYSTEM_CLOCK_SRC_PLL) &&
+		 (cfg->pll_reference_clock == YTM32_PLL_REF_FXOSC));
 	scu_config.fxoscConfig.bypassMode = cfg->fxosc_bypass;
 	scu_config.fxoscConfig.gainSelection = cfg->fxosc_gain_selection;
 	scu_config.fxoscConfig.frequency = cfg->fxosc_frequency;
+
+#if defined(FEATURE_SCU_SUPPORT_PLL) && FEATURE_SCU_SUPPORT_PLL
+	scu_config.pllConfig.enable =
+		(cfg->system_clock_source == YTM32_SYSTEM_CLOCK_SRC_PLL);
+	scu_config.pllConfig.pllRefClock =
+		(cfg->pll_reference_clock == YTM32_PLL_REF_FIRC)
+			? SCU_PLL_REF_FIRC_CLK
+			: SCU_PLL_REF_FXOSC_CLK;
+	scu_config.pllConfig.pllFeedBackDiv = (uint8_t)cfg->pll_feedback_divider;
+	scu_config.pllConfig.pllRefClkDiv = (uint8_t)cfg->pll_reference_divider;
+#endif /* FEATURE_SCU_SUPPORT_PLL */
 
 	if (!ytm32_divider_to_sys_div(cfg->core_divider, &scu_config.sysDiv)) {
 		return -EINVAL;

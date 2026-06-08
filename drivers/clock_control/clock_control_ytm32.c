@@ -63,6 +63,98 @@ BUILD_ASSERT(
 	"CONFIG_SYS_CLOCK_HW_CYCLES_PER_SEC != CGU core-clock: "
 	"check Kconfig.defconfig dt_node_int_prop_int derivation");
 
+/*
+ * ── PLL clock-tree compile-time constraints ──────────────────────────────────
+ *
+ * Derived from the YTM32B1MD1 host configuration tool (clock.ts) and the vendor
+ * CLOCK_DRV_GetPllFreq() math.  All PLL asserts short-circuit (logical-OR) when
+ * the system clock source is not PLL.
+ *
+ *   pll-ref-hz = pll-reference-clock == FIRC ? FIRC : fxosc-frequency
+ *   finput     = pll-ref-hz / pll-reference-divider          (must be 8–48 MHz)
+ *   pll-out    = (finput * pll-feedback-divider) / 2         (must be 100–200 MHz)
+ *   core-clock = pll-out / core-divider
+ */
+#define YTM32_CGU_SRC        DT_PROP(DT_NODELABEL(cgu), system_clock_source)
+#define YTM32_CGU_IS_PLL     (YTM32_CGU_SRC == YTM32_SYSTEM_CLOCK_SRC_PLL)
+#define YTM32_CGU_PLL_REFSRC DT_PROP_OR(DT_NODELABEL(cgu), pll_reference_clock, YTM32_PLL_REF_FXOSC)
+#define YTM32_CGU_PLL_REFDIV DT_PROP_OR(DT_NODELABEL(cgu), pll_reference_divider, 1)
+#define YTM32_CGU_PLL_FBDIV  DT_PROP_OR(DT_NODELABEL(cgu), pll_feedback_divider, 1)
+#define YTM32_CGU_FXOSC      DT_PROP_OR(DT_NODELABEL(cgu), fxosc_frequency, 0)
+#define YTM32_CGU_PLL_REF_HZ \
+	((YTM32_CGU_PLL_REFSRC == YTM32_PLL_REF_FIRC) ? YTM32_FIRC_HZ : YTM32_CGU_FXOSC)
+#define YTM32_CGU_PLL_FINPUT (YTM32_CGU_PLL_REF_HZ / YTM32_CGU_PLL_REFDIV)
+#define YTM32_CGU_PLL_OUT    ((YTM32_CGU_PLL_FINPUT * YTM32_CGU_PLL_FBDIV) / 2U)
+#define YTM32_CGU_FASTDIV    DT_PROP_OR(DT_NODELABEL(cgu), fast_bus_divider, 1)
+#define YTM32_CGU_SLOWDIV \
+	DT_PROP_OR(DT_NODELABEL(cgu), slow_bus_divider, \
+		   DT_PROP_OR(DT_NODELABEL(cgu), bus_divider, 1))
+
+/* (5) core-clock must equal the derived PLL output / core-divider. */
+BUILD_ASSERT(
+	!YTM32_CGU_IS_PLL ||
+	DT_PROP(DT_NODELABEL(cgu), core_clock) ==
+		YTM32_CGU_PLL_OUT / DT_PROP(DT_NODELABEL(cgu), core_divider),
+	"core-clock != PLL-out / core-divider (PLL-out = ref/refdiv * fbdiv / 2)");
+
+#if defined(CONFIG_SOC_YTM32B1MD1)
+/* (6) PLL reference divider: 1 or 3–16 (value 2 is unsupported; clock.ts). */
+BUILD_ASSERT(
+	!YTM32_CGU_IS_PLL ||
+	(YTM32_CGU_PLL_REFDIV == 1U) ||
+	((YTM32_CGU_PLL_REFDIV >= 3U) && (YTM32_CGU_PLL_REFDIV <= 16U)),
+	"pll-reference-divider out of spec: allowed 1 or 3-16 (not 2)");
+
+/* (7) PLL feedback divider: 10–63 (clock.ts). */
+BUILD_ASSERT(
+	!YTM32_CGU_IS_PLL ||
+	((YTM32_CGU_PLL_FBDIV >= 10U) && (YTM32_CGU_PLL_FBDIV <= 63U)),
+	"pll-feedback-divider out of spec: allowed 10-63");
+
+/* (8) PLL input finput = ref/refdiv must be 8–48 MHz (clock.ts). */
+BUILD_ASSERT(
+	!YTM32_CGU_IS_PLL ||
+	((YTM32_CGU_PLL_FINPUT >= 8000000U) && (YTM32_CGU_PLL_FINPUT <= 48000000U)),
+	"PLL finput (ref/refdiv) out of spec: must be 8-48 MHz");
+
+/* (9) PLL output must be 100–200 MHz (clock.ts). */
+BUILD_ASSERT(
+	!YTM32_CGU_IS_PLL ||
+	((YTM32_CGU_PLL_OUT >= 100000000U) && (YTM32_CGU_PLL_OUT <= 200000000U)),
+	"PLL output out of spec: must be 100-200 MHz");
+
+/* (10) When PLL is fed from FXOSC, the crystal must be 4–40 MHz (RM §12.1). */
+BUILD_ASSERT(
+	!YTM32_CGU_IS_PLL ||
+	(YTM32_CGU_PLL_REFSRC != YTM32_PLL_REF_FXOSC) ||
+	((YTM32_CGU_FXOSC >= 4000000U) && (YTM32_CGU_FXOSC <= 40000000U)),
+	"fxosc-frequency out of spec for PLL reference: RM §12.1 allows 4-40 MHz");
+
+/* (11) Core / fast bus / slow bus frequency ceilings (clock.ts). */
+BUILD_ASSERT(
+	DT_PROP(DT_NODELABEL(cgu), core_clock) <= 120000000U,
+	"core-clock exceeds 120 MHz (YTM32B1MD1 max, clock.ts)");
+BUILD_ASSERT(
+	(DT_PROP(DT_NODELABEL(cgu), core_clock) / YTM32_CGU_FASTDIV) <= 120000000U,
+	"fast bus clock exceeds 120 MHz (YTM32B1MD1 max, clock.ts)");
+BUILD_ASSERT(
+	((DT_PROP(DT_NODELABEL(cgu), core_clock) / YTM32_CGU_FASTDIV) /
+		YTM32_CGU_SLOWDIV) <= 40000000U,
+	"slow bus clock exceeds 40 MHz (YTM32B1MD1 max, clock.ts)");
+#endif /* CONFIG_SOC_YTM32B1MD1 */
+
+#undef YTM32_CGU_SRC
+#undef YTM32_CGU_IS_PLL
+#undef YTM32_CGU_PLL_REFSRC
+#undef YTM32_CGU_PLL_REFDIV
+#undef YTM32_CGU_PLL_FBDIV
+#undef YTM32_CGU_FXOSC
+#undef YTM32_CGU_PLL_REF_HZ
+#undef YTM32_CGU_PLL_FINPUT
+#undef YTM32_CGU_PLL_OUT
+#undef YTM32_CGU_FASTDIV
+#undef YTM32_CGU_SLOWDIV
+
 /* ─────────────────────────────────────────────────────────────────────────── */
 
 /* Driver-private constants — not part of the dt-binding public API */
@@ -703,6 +795,9 @@ static int clock_control_ytm32_init(const struct device *dev)
 			.fxosc_frequency = DT_INST_PROP_OR(n, fxosc_frequency, YTM32_FXOSC_HZ), \
 			.fxosc_bypass = DT_INST_PROP(n, fxosc_bypass), \
 			.fxosc_gain_selection = DT_INST_PROP_OR(n, fxosc_gain_selection, 6), \
+			.pll_reference_clock = DT_INST_PROP_OR(n, pll_reference_clock, YTM32_PLL_REF_FXOSC), \
+			.pll_feedback_divider = DT_INST_PROP_OR(n, pll_feedback_divider, 1), \
+			.pll_reference_divider = DT_INST_PROP_OR(n, pll_reference_divider, 1), \
 			.core_clock = DT_INST_PROP(n, core_clock), \
 			.core_divider = DT_INST_PROP(n, core_divider), \
 			.fast_bus_divider = YTM32_DT_FAST_BUS_DIVIDER(n), \

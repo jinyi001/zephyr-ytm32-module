@@ -19,6 +19,7 @@
 
 /* Vendor types are fully hidden behind this wrapper header. */
 #include "ytm32_dma_hal.h"
+#include "ytm32_dma_hal_fast.h"
 
 LOG_MODULE_REGISTER(dma_ytm32, CONFIG_DMA_LOG_LEVEL);
 
@@ -44,6 +45,29 @@ struct ytm32_dma_config {
 	clock_control_subsys_t clock_subsys;
 	void (*irq_config_func)(void);
 };
+
+/* ─────────────────────────── ch8 ZLI fast callback ─────────────────────────── */
+
+#if defined(CONFIG_DMA_YTM32_CH8_ZERO_LATENCY)
+/*
+ * Fast-path callback for DMA ch8 zero-latency ISR.
+ * Registered by the ADC DMA driver at start time.
+ * Bypasses the vendor DMA_DRV_IRQHandler entirely:
+ * directly clears ch8's done flag and invokes this callback.
+ * Eliminates: 16-channel iteration, DEV_ASSERT, virtual→physical lookup,
+ * two bridge layers.  Saves ~550 cycles vs the generic vendor path.
+ */
+typedef void (*dma_ch8_zli_cb_t)(void *user_data, int status);
+
+static dma_ch8_zli_cb_t s_ch8_zli_cb;
+static void *s_ch8_zli_user;
+
+void dma_ytm32_ch8_set_zli_cb(dma_ch8_zli_cb_t cb, void *user_data)
+{
+	s_ch8_zli_cb = cb;
+	s_ch8_zli_user = user_data;
+}
+#endif
 
 /* ─────────────────────────── HAL → Zephyr callback bridge ─────────────────────────── */
 
@@ -92,7 +116,21 @@ static void dma_ytm32_chan_irq(const void *arg)
 ISR_DIRECT_DECLARE(dma_ytm32_ch8_zli_isr)
 {
 	ytm32_dma_zli_timing_mark(YTM32_DMA_ZLI_TIMING_IRQ_ENTRY);
-	ytm32_dma_hal_irq(8U);
+
+	/*
+	 * Fast path: skip vendor DMA_DRV_IRQHandler entirely.
+	 * This ISR is connected via IRQ_DIRECT_CONNECT exclusively for ch8,
+	 * so we know the interrupt is for ch8.  Directly clear the done flag
+	 * and invoke the registered callback.
+	 * Eliminates: 16-channel iteration, DEV_ASSERT, virtual→physical lookup,
+	 * two bridge layers.  Saves ~550 cycles vs the generic vendor path.
+	 */
+	ytm32_dma_hal_clear_done_flag_inline(8U);
+
+	if (s_ch8_zli_cb) {
+		s_ch8_zli_cb(s_ch8_zli_user, 0);
+	}
+
 	ytm32_dma_zli_timing_mark(YTM32_DMA_ZLI_TIMING_IRQ_EXIT);
 	return 0;
 }

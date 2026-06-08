@@ -293,6 +293,46 @@ int pwm_ytm32_register_ovf_cb(const struct device *dev,
 	return 0;
 }
 
+/* ── 3-phase center-aligned fast duty update (FOC hot path) ──────────── */
+
+/*
+ * Center-aligned duty (Q15: 0x8000 = 100%) → shadow VAL0/VAL1 edge ticks.
+ * Mirrors eTMR_DRV_CalculateDutyCycle()'s center-aligned / UPDATE_IN_DUTY_CYCLE
+ * branch for FEATURE_eTMR_COUNT_FROM_INIT_PLUS_ONE == 0 (guarded below):
+ *   VAL0 = period·(0x4000 − duty/2) / 0x8000 − 1
+ *   VAL1 = period·(0x4000 + duty/2) / 0x8000 − 1
+ * with VAL0=VAL1=0 at 0% and (0, period−1) at 100%.  Named SDK constants keep
+ * the formula readable and portable; the BUILD_ASSERT guards the edge convention.
+ */
+#define ETMR_CENTER_EDGE(period, frac15) \
+	((uint32_t)(((uint64_t)(period) * (uint32_t)(frac15)) >> eTMR_DUTY_TO_TICKS_SHIFT) - 1U)
+
+BUILD_ASSERT(FEATURE_eTMR_COUNT_FROM_INIT_PLUS_ONE == 0,
+	     "3-phase fast path assumes the COUNT_FROM_INIT_PLUS_ONE==0 edge convention; "
+	     "revisit ETMR_CENTER_EDGE / endpoints for this SoC");
+
+/* Write one complementary-pair even channel's center-aligned shadow edges. */
+static inline void etmr_write_center_duty(eTMR_Type *base, uint8_t ch,
+					  uint32_t period, uint16_t duty_q15)
+{
+	uint32_t val0, val1;
+
+	if (duty_q15 == 0U) {                          /* 0%  */
+		val0 = 0U;
+		val1 = 0U;
+	} else if (duty_q15 >= eTMR_MAX_DUTY_CYCLE) {  /* 100% (also clamps FP overshoot) */
+		val0 = 0U;
+		val1 = period - 1U;
+	} else {
+		uint32_t half = (uint32_t)duty_q15 >> 1;
+
+		val0 = ETMR_CENTER_EDGE(period, (eTMR_MAX_DUTY_CYCLE / 2U) - half);
+		val1 = ETMR_CENTER_EDGE(period, (eTMR_MAX_DUTY_CYCLE / 2U) + half);
+	}
+	base->CH[ch].VAL0 = val0;   /* == eTMR_SetChnVal0(base, ch, val0) */
+	base->CH[ch].VAL1 = val1;   /* == eTMR_SetChnVal1(base, ch, val1) */
+}
+
 /**
  * pwm_ytm32_update_3phase_isr() - ISR 上下文中原子更新三相 PWM 占空比
  *
@@ -315,12 +355,18 @@ void pwm_ytm32_update_3phase_isr(const struct device *dev,
 				  uint16_t dc_q15)
 {
 	const struct pwm_ytm32_config *cfg = dev->config;
-	uint32_t inst = cfg->instance;
+	struct pwm_ytm32_data *data = dev->data;
+	eTMR_Type *base = g_etmrBase[cfg->instance];
+	uint32_t period = data->etmr_state.etmrPeriod;
 
-	eTMR_DRV_UpdatePwmChannel(inst, 0U, da_q15, 0U);
-	eTMR_DRV_UpdatePwmChannel(inst, 2U, db_q15, 0U);
-	eTMR_DRV_UpdatePwmChannel(inst, 4U, dc_q15, 0U);
-	eTMR_DRV_SyncWithSoftTrigger(inst);
+	/* Fast path: bypass eTMR_DRV_UpdatePwmChannel (per-call CalculateDutyCycle,
+	 * state writes, asserts).  Channels 0/2/4 are the complementary-pair even
+	 * channels (comp_mask=0x15), always center-aligned, so the general
+	 * align-mode dispatch is unnecessary — write the shadow edges directly. */
+	etmr_write_center_duty(base, 0U, period, da_q15);
+	etmr_write_center_duty(base, 2U, period, db_q15);
+	etmr_write_center_duty(base, 4U, period, dc_q15);
+	eTMR_DRV_SyncWithSoftTrigger(cfg->instance);
 }
 
 /* ── init ────────────────────────────────────────────────────────────── */

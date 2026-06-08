@@ -116,4 +116,18 @@ int ytm32_dma_hal_channel_config_loop_reload(uint8_t ch, uint8_t trigsrc,
 					     uint32_t request_count,
 					     ytm32_dma_cb_t cb, void *user_data);
 
+/* ── ch8 ZLI fast callback registration ──────────────────────────────── */
+
+#if defined(CONFIG_DMA_YTM32_CH8_ZERO_LATENCY)
+typedef void (*dma_ch8_zli_cb_t)(void *user_data, int status);
+
+/*
+ * Register a fast-path callback for DMA ch8 zero-latency ISR.
+ * When registered, the ZLI ISR skips the vendor DMA_DRV_IRQHandler
+ * and directly invokes this callback after clearing the ch8 done flag.
+ * Bypasses: 16-channel iteration, bridge layers, DEV_ASSERT checks.
+ */
+void dma_ytm32_ch8_set_zli_cb(dma_ch8_zli_cb_t cb, void *user_data);
+#endif
+
 #endif /* YTM32_DMA_HAL_H */

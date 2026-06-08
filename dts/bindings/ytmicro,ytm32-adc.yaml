@@ -38,13 +38,40 @@ properties:
     default: 2
     description: |
       ADC module internal clock divider (CFG1.PRS register field).
-      Encoding matches the SDK adc_clk_divide_t enum:
+
+      IMPORTANT: the driver uses (n + 1) semantics, NOT 2^n:
+
+        FADC = func_clk / (adc-clock-divider + 1)
+
+      This matches the vendor HAL (adc_driver.c:105):
+        adc_freq = func_clk / (1UL + clockDivider)
+      and the factory frontend (App.vue:508):
+        Func_clk_div = Func_clk / (clockDivider + 1)
+
+      Encoding:
         0 = divide by 1  (ADC_CLK_DIVIDE_1)
         1 = divide by 2  (ADC_CLK_DIVIDE_2)
-        2 = divide by 4  (ADC_CLK_DIVIDE_4, SDK default ADC_DEFAULT_CLOCK_DIVIDER)
-        3 = divide by 8  (ADC_CLK_DIVIDE_8)
-      Final ADC core clock = IPC-clock / (2 ^ adc-clock-divider).
-      RM §30.1: ADC core clock must be within 2–32 MHz.
+        2 = divide by 3  (SDK default ADC_DEFAULT_CLOCK_DIVIDER)
+        3 = divide by 4
+        ...
+        7 = divide by 8
+      Valid range: 0–15 (4-bit field, CFG1.PRS mask 0xF00).
+
+      Driver runtime assertion (adc_driver.c:106):
+        ADC_CLOCK_FREQ_MIN_RUNTIME = 2 MHz  (YTM32B1MD1_features.h)
+        ADC_CLOCK_FREQ_MAX_RUNTIME = 32 MHz
+      So FADC = func_clk / (divider + 1) must be in [2, 32] MHz.
+
+      Factory frontend validation (sdk.json adc_func_clk = [4, 32] MHz):
+        The frontend checks func_clk (after IPC divider) is in [4, 32] MHz.
+        With the SDK default divider=2 (÷3), func_clk=16 MHz → FADC=5.33 MHz.
+
+      Datasheet (DS v1.8 §6.4.5):
+        FADC (conversion clock) spec: min 0.1 MHz, max 2 MHz.
+        TSAMPLE (sampling time): min 100 ns, max 1000 ns.
+      The driver's runtime limits (2–32 MHz) are broader than the DS spec (≤2 MHz).
+      The SDK default configuration (FIRC 96÷6=16 MHz, divider=2, FADC=5.33 MHz)
+      operates above the DS spec — this is the factory-intended configuration.
 
   dmas:
     type: phandle-array
