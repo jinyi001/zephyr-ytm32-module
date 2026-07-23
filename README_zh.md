@@ -2,102 +2,98 @@
 
 [🇨🇳 中文](README_zh.md) | [🇬🇧 English](README.md)
 
-本仓库是一个 Zephyr 的“树外（out-of-tree）”模块，包含针对 **YTMicro (YTM32)** 系列微控制器的系统级芯片 (SoC) 支持、开发板定义、驱动程序以及设备树 (DTS) 文件。
+> **实验性项目声明**
+>
+> 本仓库是实验性、社区维护的 YTM32 Zephyr 模块，非云途官方支持项目，目前仍在持续开发中。API、开发板支持、驱动实现和仓库结构都可能发生变化。
 
-通过将 YTM32 的实现作为独立模块维护，您可以将其无缝集成到上游的 Zephyr 中，而无需直接修改 Zephyr 核心代码库。
+本仓库是 Zephyr 的树外（out-of-tree）模块，包含 YTMicro（YTM32）系列微控制器的 SoC 支持、开发板定义、驱动和设备树文件。
+
+## 从 `ytm32-zephyr-starter` 开始
+
+请使用 [`ytm32-zephyr-starter`](https://github.com/jinyi001/ytm32-zephyr-starter) 创建完整的 YTM32 Zephyr 工作区。不要从手动复制本仓库到 Zephyr 目录开始，也不要手动编辑上游 `west.yml`。
+
+按照 starter 的 README 执行以下步骤：
+
+1. 从模板仓库创建独立的应用工程；
+2. 使用 Workbench for Zephyr 或 `west` 初始化 West workspace；
+3. 自动安装 Zephyr、YTMicro HAL、本模块、SDK 和所需工具；
+4. 构建、烧录和调试目标 YTM32 开发板。
+
+starter 的 manifest 会固定 Zephyr、HAL 和 YTM32 module 的版本，保证新建工作区可复现：
+
+```text
+https://github.com/jinyi001/ytm32-zephyr-starter
+```
+
+本仓库是 starter 的平台依赖，不是应用入口。应用代码和产品相关的板级集成应放在从 starter 创建的独立应用仓库中。
 
 ## 支持的硬件
 
-目前支持以下开发板：
-- **YTM32B1MC0 EVB** (`ytm32b1mc0_evb`)
+当前支持：
 
-## 前提条件
+- **YTM32B1MC0 EVB**（`ytm32b1mc0_evb`）
 
-在开始之前，请确保您已经配置好了可工作的 Zephyr 工具链和开发环境。如果尚未配置，请参考官方的 [Zephyr 入门指南](https://docs.zephyrproject.org/latest/develop/getting_started/index.html)。
+更多芯片和开发板仍在开发中。
 
-## 如何使用此模块
+## 在 starter 工作区中编译模块示例
 
-### 1. 更新 `west.yml` 清单
+完成 starter 工作区初始化后，在 workspace 根目录执行命令。本模块通常位于 `modules/ytmicro/zephyr-ytm32`。
 
-要将此模块包含到您的 Zephyr 工作区中，您需要将本模块连同厂商的硬件抽象层 (`hal_ytmicro`) 一起添加到工作区的 `west.yml` 清单文件中。
-
-打开 `zephyr/west.yml`（或您的工作区清单文件），并在 `projects:` 部分下添加以下内容：
-
-```yaml
-    - name: hal_ytmicro
-      path: modules/hal/ytmicro
-      url: https://github.com/jinyi001/hal_ytmicro.git
-      revision: main
-    - name: zephyr-ytm32-module
-      path: zephyr-ytm32-module
-      url: https://github.com/jinyi001/zephyr-ytm32-module.git
-      revision: main
-```
-
-### 2. 更新 West 工作区
-
-更新清单文件后，使用 `west update` 获取新添加的代码库：
+编译本模块的 `hello_world` 示例：
 
 ```bash
-# 在您的 zephyrproject 根目录下执行
-west update
+west build \
+  -b ytm32b1mc0_evb \
+  modules/ytmicro/zephyr-ytm32/samples/hello_world \
+  -d build/ytm32-module-hello
 ```
 
-这将会把 `hal_ytmicro` 和 `zephyr-ytm32-module` 克隆到您的工作区中。
-
-## 编译示例程序
-
-您可以编译本模块提供的示例，或是针对 YTM32 开发板标准的 Zephyr 示例。
-
-从本仓库构建 `hello_world` 示例：
+执行 pristine build：
 
 ```bash
-# 在 zephyrproject 根目录下执行
-west build -b ytm32b1mc0_evb zephyr-ytm32-module/samples/hello_world
+west build -p always \
+  -b ytm32b1mc0_evb \
+  modules/ytmicro/zephyr-ytm32/samples/hello_world \
+  -d build/ytm32-module-hello
 ```
 
-如果您希望进行一次干净的构建（清除先前的构建产物），可以加上 `-p` 标志：
-```bash
-west build -p -b ytm32b1mc0_evb zephyr-ytm32-module/samples/hello_world
-```
-
-若要验证 GPIO 兼容层是否已经对齐到标准 Zephyr 用法，建议优先直接构建上游 `blinky` 示例：
+验证 GPIO 兼容层时，建议直接编译上游 `blinky` 示例：
 
 ```bash
-# 在 zephyrproject 根目录下执行
-west build -b ytm32b1mc0_evb zephyr/samples/basic/blinky
+west build -p always \
+  -b ytm32b1mc0_evb \
+  zephyr/samples/basic/blinky \
+  -d build/ytm32-blinky
 ```
 
-本仓库里的 `zephyr-ytm32-module/samples/blinky` 会保持与上游 `blinky` 相同的逻辑，但主验证目标应以上游示例为准。
+## 烧录和调试
 
-## 烧录与调试
+开发板使用 SWD 和 J-Link runner。按照 starter README 安装 SEGGER J-Link 软件及 YTM32 device patch，然后执行：
 
-### 终端输出
-默认情况下，`ytm32b1mc0_evb` 的终端输出被映射到板载的 UART（通常是通过 USB 的 UART1）。请确保您打开了正确的 COM 端口，并设置了开发板设备树中配置的波特率（通常为 `115200`）。
+```bash
+west flash -r jlink -d build/ytm32-module-hello
+west debug -d build/ytm32-module-hello
+```
 
-另外，当 UART 不可用时，本项目支持通过 **SEGGER RTT** 路由打印终端以便进行调试。您可以通过在配置中设置以下选项来开启：
-```kconfig
+默认终端输出走板载 UART。当 UART 不可用时，可在应用配置中启用 SEGGER RTT：
+
+```conf
 CONFIG_USE_SEGGER_RTT=y
 CONFIG_RTT_CONSOLE=y
 CONFIG_UART_CONSOLE=n
 ```
 
-### 烧录
-您可以使用标准的 SWD 调试器（如 Segger J-Link）来烧录代码。具体取决于您的设置和 `west flash` 配置，运行：
-
-```bash
-west flash
-```
-*(请确保您的调试器已正确连接到开发板的调试排针上。)*
-
 ## 仓库结构
 
-- `boards/` - 开发板配置及设备树定义（例如 `ytm32b1mc0_evb`）
-- `soc/` - YTM32 SoC 特定的初始化及胶水层代码
-- `drivers/` - 针对 YTMicro 外设的树外驱动程序（例如中断控制器）
-- `dts/` - 专用于 YTMicro 硬件的设备树绑定说明
-- `samples/` - 演示相关功能的示例应用程序
-- `zephyr/` - Zephyr 模块配置 (`module.yml`) 及 Kconfig 文件
+- `boards/` — 开发板配置和设备树定义；
+- `soc/` — YTM32 SoC 初始化和胶水层代码；
+- `drivers/` — YTMicro 外设驱动；
+- `dts/` — 设备树绑定和 SoC 描述；
+- `samples/` — 模块验证示例；
+- `zephyr/` — Zephyr 模块元数据和 Kconfig 文件。
 
-## 参与贡献
-当需要修改胶水代码或移植相关部分时，请直接将提交通知提交到本仓库。这样可以保证上游的 Zephyr 组件的整洁，任何专门为 YTM32 增加的内容应保存在本仓库或 `hal_ytmicro` 中。
+## 开发边界
+
+SoC 支持、开发板定义和通用 YTM32 驱动放在本仓库。厂商 HAL 更新应在 `hal_ytmicro` 中用新的原厂版本替换旧快照；不要在本仓库放置应用逻辑。
+
+修改本模块后，需要更新 starter manifest 中固定的 revision，并在全新的 starter 工作区中完成验证，再发布新的 starter 版本。

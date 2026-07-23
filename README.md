@@ -2,102 +2,98 @@
 
 [🇨🇳 中文](README_zh.md) | [🇬🇧 English](README.md)
 
-This repository is an out-of-tree Zephyr module containing the System-on-Chip (SoC) support, board definitions, drivers, and device tree (DTS) files for the **YTMicro (YTM32)** series microcontrollers.
+> **Experimental project**
+>
+> This is an experimental, community-maintained YTM32 Zephyr module. It is not an official YTMicro/云途 supported project and is still under active development. APIs, board support, drivers, and repository layout may change.
 
-By keeping the YTM32 implementation as an out-of-tree module, you can seamlessly integrate it with upstream Zephyr without modifying the core Zephyr repository directly. 
+This repository is an out-of-tree Zephyr module containing the System-on-Chip (SoC) support, board definitions, drivers, and device-tree files for YTMicro (YTM32) microcontrollers.
 
-## Supported Hardware
+## Start with `ytm32-zephyr-starter`
 
-Currently, the following development boards are supported:
+Use [`ytm32-zephyr-starter`](https://github.com/jinyi001/ytm32-zephyr-starter) to create a complete YTM32 Zephyr workspace. Do not start by manually copying this repository into a Zephyr tree or by editing an upstream `west.yml`.
+
+Follow the starter README to:
+
+1. Create an independent project from the template repository;
+2. Initialize the West workspace with Workbench for Zephyr or `west`;
+3. Install Zephyr, the YTMicro HAL, this module, the SDK, and the required tools;
+4. Build, flash, and debug the selected YTM32 board.
+
+The starter manifest pins the Zephyr, HAL, and YTM32 module revisions so that a new workspace is reproducible:
+
+```text
+https://github.com/jinyi001/ytm32-zephyr-starter
+```
+
+This module is a platform dependency of the starter, not the application entry point. Keep application code and product-specific board integration in the independent application repository created from the starter.
+
+## Supported hardware
+
+Currently supported:
+
 - **YTM32B1MC0 EVB** (`ytm32b1mc0_evb`)
 
-## Prerequisites
+Additional boards and SoCs are still being developed.
 
-Before getting started, make sure you have a working Zephyr toolchain and development environment. If not, follow the official [Zephyr Getting Started Guide](https://docs.zephyrproject.org/latest/develop/getting_started/index.html).
+## Build module samples after initializing the starter workspace
 
-## How to use this module
+After the starter workspace has been initialized, run commands from the workspace root. The module is normally located at `modules/ytmicro/zephyr-ytm32`.
 
-### 1. Update your `west.yml` manifest
-
-To include this module in your Zephyr workspace, you need to add it along with the vendor HAL (`hal_ytmicro`) directly to your workspace `west.yml` manifest file. 
-
-Open `zephyr/west.yml` (or your workspace manifest) and add the following entries under the `projects:` section:
-
-```yaml
-    - name: hal_ytmicro
-      path: modules/hal/ytmicro
-      url: https://github.com/jinyi001/hal_ytmicro.git
-      revision: main
-    - name: zephyr-ytm32-module
-      path: zephyr-ytm32-module
-      url: https://github.com/jinyi001/zephyr-ytm32-module.git
-      revision: main
-```
-
-### 2. Update West workspace
-
-After updating the manifest, fetch the newly added repositories using `west update`:
+Build the module `hello_world` sample:
 
 ```bash
-# In your zephyrproject root directory
-west update
+west build \
+  -b ytm32b1mc0_evb \
+  modules/ytmicro/zephyr-ytm32/samples/hello_world \
+  -d build/ytm32-module-hello
 ```
 
-This will clone both the `hal_ytmicro` and the `zephyr-ytm32-module` into your workspace.
-
-## Building Samples
-
-You can compile samples provided in this module, or standard Zephyr samples targeting the YTM32 boards.
-
-To build the `hello_world` sample from this repository:
+For a pristine build:
 
 ```bash
-# From the zephyrproject root directory
-west build -b ytm32b1mc0_evb zephyr-ytm32-module/samples/hello_world
+west build -p always \
+  -b ytm32b1mc0_evb \
+  modules/ytmicro/zephyr-ytm32/samples/hello_world \
+  -d build/ytm32-module-hello
 ```
 
-If you wish to do a pristine build (clearing previous build artifacts), you can append the `-p` flag:
-```bash
-west build -p -b ytm32b1mc0_evb zephyr-ytm32-module/samples/hello_world
-```
-
-To validate the GPIO compatibility layer with the standard Zephyr `blinky` sample, prefer building the upstream sample directly:
+To validate the GPIO compatibility layer with the upstream sample, build:
 
 ```bash
-# From the zephyrproject root directory
-west build -b ytm32b1mc0_evb zephyr/samples/basic/blinky
+west build -p always \
+  -b ytm32b1mc0_evb \
+  zephyr/samples/basic/blinky \
+  -d build/ytm32-blinky
 ```
 
-The local `zephyr-ytm32-module/samples/blinky` sample is kept aligned with the upstream `blinky` logic, but the upstream sample should be treated as the primary bring-up target.
+## Flashing and debugging
 
-## Flashing and Debugging
+The board uses SWD and a J-Link runner. Install the SEGGER J-Link software and the YTM32 device patch as described by the starter README, then run:
 
-### Console Output
-The default console output on `ytm32b1mc0_evb` maps to the onboard UART (usually UART1 over USB). Make sure you have the correct COM port open at the baudrate configured in the board's device tree (typically `115200`).
+```bash
+west flash -r jlink -d build/ytm32-module-hello
+west debug -d build/ytm32-module-hello
+```
 
-Alternatively, the project supports routing the print console via **SEGGER RTT** for debugging when UART is unavailable. You can enable this by setting:
-```kconfig
+The default console is routed to the board UART. SEGGER RTT can be enabled by the application configuration when UART is unavailable:
+
+```conf
 CONFIG_USE_SEGGER_RTT=y
 CONFIG_RTT_CONSOLE=y
 CONFIG_UART_CONSOLE=n
 ```
 
-### Flashing
-You can flash the code using a standard SWD debugger (such as a Segger J-Link). Depending on your setup and `west flash` configuration, run:
+## Repository structure
 
-```bash
-west flash
-```
-*(Ensure your debugger is properly connected to the board's debug headers.)*
+- `boards/` — board configuration and device-tree definitions;
+- `soc/` — YTM32 SoC initialization and glue code;
+- `drivers/` — YTMicro peripheral drivers;
+- `dts/` — device-tree bindings and SoC descriptions;
+- `samples/` — module validation samples;
+- `zephyr/` — Zephyr module metadata and Kconfig files.
 
-## Repository Structure
+## Development boundary
 
-- `boards/` - Board configuration and device tree definitions (e.g., `ytm32b1mc0_evb`)
-- `soc/` - YTM32 SoC-specific initialization and glue code
-- `drivers/` - Out-of-tree drivers specific to YTMicro peripherals (e.g., interrupts)
-- `dts/` - Device tree bindings specifically for YTMicro hardware
-- `samples/` - Example applications demonstrating capability
-- `zephyr/` - Zephyr module configuration (`module.yml`) and Kconfig files
+Put SoC support, board definitions, and generic YTM32 drivers in this repository. Put vendor HAL updates in `hal_ytmicro` by replacing the vendor snapshot with a new upstream release; do not add application logic here.
 
-## Contributing
-When making changes to the glue code or the port, commit them directly to this repository. The upstream zephyr components remain clean, and any additions specifically needed for YTM32 should be captured here or in `hal_ytmicro`.
+When changing this module, update the pinned revision in the starter manifest and test a clean starter workspace before publishing a new starter version.
