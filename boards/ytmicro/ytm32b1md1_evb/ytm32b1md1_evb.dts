@@ -1,0 +1,39 @@
+/*
+ * Copyright (c) 2026 YI JIN <jinyi_2001@foxmail.com>
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/dts-v1/;
+#include <ytmicro/ytm32/ytm32b1md1.dtsi>
+
+/ {
+	model = "YTM YTM32B1MD1 EVB";
+	compatible = "ytm,ytm32b1md1-evb";
+
+	chosen {
+		zephyr,sram = &sram0;
+		zephyr,flash = &flash0;
+	};
+};
+
+/*
+ * Use the internal 96 MHz oscillator so the minimal board does not depend on
+ * an external crystal or any optional PLL configuration.
+ */
+&cgu {
+	system-clock-source = <YTM32_SYSTEM_CLOCK_SRC_FIRC>;
+	core-clock = <96000000>;
+	core-divider = <1>;
+	fast-bus-divider = <1>;
+	slow-bus-divider = <3>;
+};
+
+/* Keep pin multiplexing empty until an application supplies an overlay. */
+&pinctrl {
+	status = "disabled";
+};
+
+/* The trigger multiplexer is optional and unused by the minimal board. */
+&tmu0 {
+	status = "disabled";
+};
