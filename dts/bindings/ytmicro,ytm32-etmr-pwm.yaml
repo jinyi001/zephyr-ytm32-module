@@ -1,0 +1,128 @@
+description: YTMicro YTM32 eTMR PWM controller
+
+compatible: "ytmicro,ytm32-etmr-pwm"
+
+include:
+  - name: pwm-controller.yaml
+  - name: pinctrl-device.yaml
+  - name: base.yaml
+
+properties:
+  reg:
+    required: true
+
+  interrupts:
+    required: true
+    description: |
+      Six interrupts in order: Ch0/Ch1, Ch2/Ch3, Ch4/Ch5, Ch6/Ch7, Fault, Overflow.
+
+  interrupt-names:
+    type: string-array
+    required: true
+
+  clocks:
+    type: phandle-array
+    required: true
+    description: eTMR peripheral clock specifier from the CGU.
+
+  ytmicro,instance:
+    type: int
+    required: true
+    description: Hardware eTMR instance index (0-3).
+
+  ytmicro,functional-clock-source:
+    type: int
+    required: true
+    description: Functional clock source passed to the YTM32 clock controller (YTM32_CLOCK_SRC_*).
+
+  ytmicro,functional-clock-divider:
+    type: int
+    required: false
+    default: 1
+    description: Functional clock divider passed to the YTM32 clock controller.
+
+  ytmicro,prescaler:
+    type: int
+    required: false
+    default: 0
+    description: |
+      eTMR internal clock prescaler. Counter clock = functional_clock >> prescaler.
+      Valid range 0-7 (divide by 1, 2, 4, 8, 16, 32, 64, 128).
+
+  ytmicro,complementary-channels-mask:
+    type: int
+    required: false
+    default: 0
+    description: |
+      Bitmask of even channel IDs that drive complementary pairs.
+      Bit N set means channel N (must be even) and channel N+1 form a
+      complementary pair with center-aligned PWM and dead-time insertion.
+      Example: 0x15 (0b00010101) enables pairs CH0/CH1, CH2/CH3, CH4/CH5.
+
+  ytmicro,deadtime-ns:
+    type: int
+    required: false
+    default: 0
+    description: |
+      Dead-time insertion in nanoseconds, applied identically to all
+      complementary pairs defined by ytmicro,complementary-channels-mask.
+
+  ytmicro,pwm-frequency-hz:
+    type: int
+    required: false
+    default: 20000
+    description: |
+      Initial PWM switching frequency in Hz used during driver init.
+      The first pwm_set_cycles() call will override this.
+
+  ytmicro,adc-sync-trigger:
+    type: boolean
+    description: |
+      Emit a hardware INIT-match output trigger that drives the
+      eTMR<n>_INIT_TRIG TMU source used to hardware-trigger the ADC
+      (eTMR -> TMU -> ADC -> DMA chain) on MD1.  The trigger fires on the
+      counter-bottom INIT match (OTRIG.INITTEN), the canonical instant to
+      sample phase currents for center-aligned motor PWM.  The driver widens
+      the pulse so it survives CIM resampling onto the ADC function clock.
+
+  ytmicro,adc-trigger-width:
+    type: int
+    required: false
+    default: 16
+    description: |
+      eTMR output trigger pulse width in counter clock cycles.
+      Must be wide enough to be captured by CIM at the ADC functional clock.
+      The minimum safe value depends on the ratio of eTMR clock to ADC
+      functional clock. Default 16 cycles is empirically verified at 48 MHz
+      eTMR / 4 MHz ADC (FXOSC ÷4).
+
+  ytmicro,adc-mid-trigger:
+    type: boolean
+    description: |
+      Emit a hardware MID-match output trigger via OTRIG.MIDTEN + the MID
+      register (MID = MOD/2).  This fires eTMR<n>_EXT_TRIG (TMU slot 23)
+      exactly once per PWM period at the carrier mid-point — the canonical
+      instant for FOC phase-current sampling.  No channel is consumed; the
+      driver updates MID automatically whenever the PWM period changes.
+      Note: MIDTEN (an OTRIG register bit) maps to EXT_TRIG (slot 23), not
+      INIT_TRIG (slot 22); only INITEN maps to INIT_TRIG.
+      The ADC node must set ytmicro,hw-trigger-source to
+      YTM32_TMU_SRC_ETMRn_EXT_TRIG accordingly.
+      Mutually exclusive with ytmicro,adc-sync-trigger.
+
+  ytmicro,autostart:
+    type: boolean
+    description: |
+      Start the eTMR counter during driver initialisation.
+      When absent (default), the counter is configured but not started;
+      use this in applications that explicitly start PWM at boot.
+      Motor applications and trigger-chain tests should set this property;
+      non-motor users of the board should not.
+
+  "#pwm-cells":
+    const: 3
+
+pwm-cells:
+  - channel
+  - period
+  - flags

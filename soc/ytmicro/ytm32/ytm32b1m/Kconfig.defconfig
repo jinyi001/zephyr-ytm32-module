@@ -4,17 +4,27 @@
 if SOC_SERIES_YTM32B1M
 
 config NUM_IRQS
-	default 76
+	default 76 if SOC_YTM32B1MC0
+	default 192 if SOC_YTM32B1MD1
 
 config SYS_CLOCK_HW_CYCLES_PER_SEC
-	default 80000000 
+	default "$(dt_node_int_prop_int,/cgu,core-clock)"
 
 config CORTEX_M_SYSTICK
 	default y
 
-# YTM32 has ECC-protected SRAM that must be written before any read.
-# soc_early_reset_hook fills all 32KB RAM before stack/C code runs.
-config SOC_EARLY_RESET_HOOK
+# Run SoC preparation hook before Zephyr relocates vectors and clears/copies RAM.
+config SOC_PREP_HOOK
+	default y
+
+# Debug: prefill stacks with 0xaa so stack high-water usage can be inspected.
+config INIT_STACKS
+	default y
+
+# soc_reset_hook runs before VTOR is redirected, disabling SysTick to prevent
+# the bootloader's timer from firing through our sys_clock_isr before kernel
+# data (.data section) is initialised.  It also writes all SRAM to clear ECC.
+config SOC_RESET_HOOK
 	default y
 
 # Run SystemInit() to disable watchdog and configure flash.

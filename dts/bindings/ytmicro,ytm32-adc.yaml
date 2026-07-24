@@ -1,0 +1,135 @@
+description: YTMicro YTM32 ADC controller
+
+compatible: "ytmicro,ytm32-adc"
+
+include: [adc-controller.yaml, pinctrl-device.yaml]
+
+properties:
+  reg:
+    required: true
+
+  interrupts:
+    required: true
+
+  clocks:
+    type: phandle-array
+    required: true
+    description: ADC peripheral clock specifier from the CGU.
+
+  ytmicro,functional-clock-source:
+    type: int
+    required: true
+    description: Functional clock source passed to the YTM32 clock controller.
+
+  ytmicro,functional-clock-divider:
+    type: int
+    required: false
+    default: 1
+    description: |
+      IPC peripheral clock divider for the ADC bus clock.
+      Passed to the YTM32 clock controller; the hardware divides the selected
+      source by this value.  Default 1 = no division (source clock direct).
+      This is separate from the ADC module's internal clock divider
+      (ytmicro,adc-clock-divider), which further divides the IPC clock.
+
+
+  ytmicro,adc-start-time:
+    type: int
+    required: false
+    default: 32
+    description: |
+      ADC startup time register field (CFG1.STCNT), in ADC clock ticks.
+      The vendor HAL writes this value directly via ADC_SetStartTime(); actual
+      startup delay is (adc-start-time + 1) / FADC.
+
+      Keep this consistent with FADC when changing ytmicro,adc-clock-divider:
+        FADC=16 MHz  -> default 32 gives 33/16MHz = 2.06 us
+        FADC=32 MHz  -> use at least 63 for 64/32MHz = 2.00 us
+
+  ytmicro,adc-clock-divider:
+    type: int
+    required: false
+    default: 2
+    description: |
+      ADC module internal clock divider (CFG1.PRS register field).
+
+      IMPORTANT: the driver uses (n + 1) semantics, NOT 2^n:
+
+        FADC = func_clk / (adc-clock-divider + 1)
+
+      This matches the vendor HAL (adc_driver.c:105):
+        adc_freq = func_clk / (1UL + clockDivider)
+      and the factory frontend (App.vue:508):
+        Func_clk_div = Func_clk / (clockDivider + 1)
+
+      Encoding:
+        0 = divide by 1  (ADC_CLK_DIVIDE_1)
+        1 = divide by 2  (ADC_CLK_DIVIDE_2)
+        2 = divide by 3  (SDK default ADC_DEFAULT_CLOCK_DIVIDER)
+        3 = divide by 4
+        ...
+        7 = divide by 8
+      Valid range: 0–15 (4-bit field, CFG1.PRS mask 0xF00).
+
+      Driver runtime assertion (adc_driver.c:106):
+        ADC_CLOCK_FREQ_MIN_RUNTIME = 2 MHz  (YTM32B1MD1_features.h)
+        ADC_CLOCK_FREQ_MAX_RUNTIME = 32 MHz
+      So FADC = func_clk / (divider + 1) must be in [2, 32] MHz.
+
+      Factory frontend validation (sdk.json adc_func_clk = [4, 32] MHz):
+        The frontend checks func_clk (after IPC divider) is in [4, 32] MHz.
+        With the SDK default divider=2 (÷3), func_clk=16 MHz → FADC=5.33 MHz.
+
+      Datasheet (DS v1.8 §6.4.5):
+        FADC (conversion clock) spec: min 0.1 MHz, max 2 MHz.
+        TSAMPLE (sampling time): min 100 ns, max 1000 ns.
+      The driver's runtime limits (2–32 MHz) are broader than the DS spec (≤2 MHz).
+      The SDK default configuration (FIRC 96÷6=16 MHz, divider=2, FADC=5.33 MHz)
+      operates above the DS spec — this is the factory-intended configuration.
+
+  dmas:
+    type: phandle-array
+    required: false
+    description: |
+      DMA channel for draining the ADC FIFO in hardware-triggered mode.
+      Provide one entry: <&dma0 channel slot>.
+
+  dma-names:
+    type: string-array
+    required: false
+    description: Must be "rx" when dmas is present.
+
+  ytmicro,hw-trigger-source:
+    type: int
+    required: false
+    description: |
+      TMU trigger source index routed to ADC0_EXT_TRIG.
+      Example: YTM32_TMU_SRC_ETMR0_INIT_TRIG (22).
+      When absent, only software-triggered mode is available.
+
+  ytmicro,tmu:
+    type: phandle
+    required: false
+    description: |
+      TMU device used to route ytmicro,hw-trigger-source to the ADC external
+      trigger input when hardware-triggered DMA sampling is started.
+      Required together with ytmicro,hw-trigger-source for Phase 2 DMA mode.
+
+  ytmicro,cim-trigger-select:
+    type: int
+    required: false
+    default: 2
+    description: |
+      CIM ADC0_TRIG_SEL field value selecting the hardware trigger source.
+      Values (YTM32B1MD1 SVD, CIM_CTRL register):
+        0 = PTU output
+        1 = TMU output synchronised by bus clock
+        2 = TMU output synchronised by ADC functional clock (recommended, default)
+      Bus-clock sync (1) can drop the trigger edge on MD1 when the ADC
+      functional clock is slow relative to the bus clock.
+
+  "#io-channel-cells":
+    const: 1
+
+io-channel-cells:
+  - input

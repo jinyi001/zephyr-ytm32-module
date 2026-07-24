@@ -1,0 +1,16 @@
+# Copyright (c) 2026 YI JIN <jinyi_2001@foxmail.com>
+# SPDX-License-Identifier: Apache-2.0
+
+config FLASH_YTM32
+	bool "YTMicro YTM32 EFM flash driver"
+	default y
+	depends on FLASH
+	depends on HAS_YTMICRO_HAL
+	depends on DT_HAS_YTMICRO_YTM32_FLASH_CONTROLLER_ENABLED
+	select FLASH_HAS_PAGE_LAYOUT
+	select FLASH_HAS_DRIVER_ENABLED
+	help
+	  Enable the flash driver for YTMicro YTM32 SoCs. It wraps the vendor
+	  EFM FLASH_DRV_* API (synchronous mode). Program/erase transiently
+	  disable the Cortex-M MPU inside an IRQ-masked window in the vendor
+	  code, so do not call them from real-time control paths.

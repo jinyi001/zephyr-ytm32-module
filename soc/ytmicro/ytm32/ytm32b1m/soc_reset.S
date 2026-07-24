@@ -2,45 +2,50 @@
  * Copyright (c) 2026 YI JIN <jinyi_2001@foxmail.com>
  * SPDX-License-Identifier: Apache-2.0
  *
- * YTM32B1MC0 ECC SRAM initialization.
+ * soc_reset_hook — called from Zephyr reset.S (CONFIG_SOC_RESET_HOOK) after
+ * the MSP is set but BEFORE relocate_vector_table() changes VTOR.
  *
- * This chip has ECC-protected SRAM. After power-on reset, ECC checkbits are
- * in an undefined state. Any read from an uninitialized RAM address triggers
- * an ECC error (bus fault). ALL 32KB of SRAM must be written before it can
- * be safely read.
+ * One responsibility:
  *
- * This routine runs via CONFIG_SOC_EARLY_RESET_HOOK, which is called from
- * Zephyr's reset.S BEFORE the stack pointer is set up and before any C code
- * or RAM access occurs. It uses only registers (no stack) to fill the entire
- * SRAM range with a known pattern.
+ * 1. ECC SRAM initialisation.
+ *    YTM32B1M SRAM is ECC-protected.  ECC check-bits are undefined at
+ *    power-on reset; any read from an unwritten address generates a bus
+ *    fault.  We write the entire SRAM with a known pattern before any C
+ *    code (which may read globals) executes.
  *
- * Memory map:
- *   SRAM start: 0x20000000
- *   SRAM end:   0x20008000 (32KB)
+ *    The SRAM range is taken from Zephyr's generated Kconfig values
+ *    (CONFIG_SRAM_BASE_ADDRESS / CONFIG_SRAM_SIZE), which are derived from
+ *    the active board/devicetree memory definition.
+ *
+ * Implementation notes:
+ *   • Uses only r0-r3 and LR — no push/pop, so the uninitialised stack is
+ *     never read (ECC-safe entry and exit).
+ *   • Returns via bx lr (register-only, no stack pop).
  */
 
 .syntax unified
 .thumb
 
-.global soc_early_reset_hook
-.type soc_early_reset_hook, %function
-.section .text.soc_early_reset_hook, "ax"
+.global soc_reset_hook
+.type   soc_reset_hook, %function
+.section .text.soc_reset_hook, "ax"
 .align 2
 
-soc_early_reset_hook:
-    /* Fill pattern: 0x5A5A5A5A (same as vendor SDK RamInit0) */
-    ldr r0, =0x5A5A5A5A
-    mov r1, r0
+soc_reset_hook:
+    /* ------------------------------------------------------------------ */
+    /* 1.  ECC SRAM initialisation — write every word before any read.    */
+    /* ------------------------------------------------------------------ */
+    ldr  r0, =0x5A5A5A5A        /* fill pattern (matches vendor RamInit0) */
+    mov  r1, r0
 
-    /* SRAM range: 0x20000000 - 0x20008000 (32 KB) */
-    ldr r2, =0x20000000
-    ldr r3, =0x20008000
+    ldr  r2, =CONFIG_SRAM_BASE_ADDRESS
+    ldr  r3, =(CONFIG_SRAM_BASE_ADDRESS + (CONFIG_SRAM_SIZE * 1024))
 
 .L_ecc_fill_loop:
-    stm r2!, {r0, r1}      /* Store 8 bytes per iteration, auto-increment r2 */
-    cmp r2, r3
-    blo .L_ecc_fill_loop    /* Loop until r2 >= r3 */
+    stm  r2!, {r0, r1}          /* store 8 bytes, advance r2             */
+    cmp  r2, r3
+    blo  .L_ecc_fill_loop
 
-    bx lr                   /* Return to reset.S */
+    bx   lr
 
-.size soc_early_reset_hook, . - soc_early_reset_hook
+.size soc_reset_hook, . - soc_reset_hook

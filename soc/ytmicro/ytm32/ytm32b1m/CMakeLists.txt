@@ -7,6 +7,11 @@ if(CONFIG_SOC_YTM32B1MC0)
   zephyr_compile_definitions(CPU_YTM32B1MC0)
 endif()
 
+
+if(CONFIG_SOC_YTM32B1MD1)
+  zephyr_compile_definitions(CPU_YTM32B1MD1)
+endif()
+
 zephyr_sources(soc.c)
 zephyr_sources(soc_reset.S)
 

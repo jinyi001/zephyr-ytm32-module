@@ -1,0 +1,9 @@
+if(CONFIG_DMA_YTM32)
+  zephyr_library_sources(
+    ytm32_dma_hal.c
+    dma_ytm32.c
+  )
+  zephyr_library_sources_ifdef(CONFIG_DMA_YTM32_CH8_ZLI_TIMING
+    ytm32_dma_zli_timing.c
+  )
+endif()

@@ -1,0 +1,9 @@
+config PWM_YTM32_ETMR
+	bool "YTMicro YTM32 eTMR PWM driver"
+	default y
+	depends on DT_HAS_YTMICRO_YTM32_ETMR_PWM_ENABLED
+	select PINCTRL
+	help
+	  Enable PWM driver for the YTM32 eTMR peripheral.
+	  Supports independent and complementary output modes with
+	  dead-time insertion, suitable for motor control (FOC) applications.

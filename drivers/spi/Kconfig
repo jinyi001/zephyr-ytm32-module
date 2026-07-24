@@ -1,0 +1,26 @@
+config SPI_YTM32
+	bool "YTM32 SPI driver"
+	default y
+	depends on DT_HAS_YTMICRO_YTM32_SPI_ENABLED
+	select SPI
+	help
+	  Enable YTM32 SPI controller driver.
+
+config SPI_YTM32_TRANSFER_TIMEOUT_MS
+	int "YTM32 SPI transfer timeout in milliseconds"
+	default 1000
+	depends on SPI_YTM32
+	help
+	  Timeout used while waiting for a SPI transfer to complete (both
+	  interrupt-driven and DMA modes).
+
+config SPI_YTM32_DMA
+	bool "YTM32 SPI DMA support"
+	default y
+	depends on SPI_YTM32 && DMA_YTM32
+	help
+	  When enabled and the SPI device tree node carries a valid 'dmas'
+	  property, the driver initialises the SPI controller in DMA mode.
+	  Each transfer segment is handed off to the vendor SPI HAL, which
+	  uses the designated DMA channels internally.  Falls back to
+	  interrupt-driven mode if the property is absent.

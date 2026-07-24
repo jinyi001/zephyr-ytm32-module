@@ -10,46 +10,29 @@
 #include <zephyr/device.h>
 #include <zephyr/drivers/clock_control.h>
 #include <zephyr/drivers/counter.h>
-#include <zephyr/dt-bindings/clock/ytmicro,ytm32-clock.h>
+#include <zephyr/dt-bindings/clock/ytmicro,ytm32-soc-clock.h>
 #include <zephyr/irq.h>
 #include <zephyr/spinlock.h>
-#include <zephyr/sys/sys_io.h>
+#include "device_registers.h"
 
-#define YTM32_LPTMR_BASE 0x4005D000U
-
-#define YTM32_LPTMR_CTRL_OFFSET 0x00U
-#define YTM32_LPTMR_PRS_OFFSET  0x04U
-#define YTM32_LPTMR_DIE_OFFSET  0x08U
-#define YTM32_LPTMR_STS_OFFSET  0x0CU
-#define YTM32_LPTMR_CMP_OFFSET  0x10U
-#define YTM32_LPTMR_LCNT_OFFSET 0x14U
-#define YTM32_LPTMR_CNT_OFFSET  0x18U
-
-#define YTM32_LPTMR_CTRL_TMODE BIT(2)
-#define YTM32_LPTMR_CTRL_MODE  BIT(1)
-#define YTM32_LPTMR_CTRL_EN    BIT(0)
-
-#define YTM32_LPTMR_PRS_PRES_MASK   GENMASK(6, 3)
-#define YTM32_LPTMR_PRS_BYPASS      BIT(2)
-#define YTM32_LPTMR_PRS_CLKSEL_MASK GENMASK(1, 0)
-
-#define YTM32_LPTMR_DIE_IE  BIT(0)
-#define YTM32_LPTMR_STS_CCF BIT(0)
-#define YTM32_LPTMR_CMP_MASK 0xFFFFU
-#define YTM32_LPTMR_CNT_MASK 0xFFFFU
-
+/*
+ * Register layout (lpTMR_Type) and field masks/shifts come from the vendor HAL
+ * device header selected by device_registers.h.  Only the clock-source value
+ * encodings and counter limits below are not part of that header.
+ */
 #define YTM32_LPTMR_CLOCK_SEL_FIRC  0U
 #define YTM32_LPTMR_CLOCK_SEL_SIRC  1U
 #define YTM32_LPTMR_CLOCK_SEL_FXOSC 2U
 #define YTM32_LPTMR_CLOCK_SEL_LPO   3U
 
 #define YTM32_LPTMR_COUNTER_CHANNELS 1U
-#define YTM32_LPTMR_DEFAULT_TOP      YTM32_LPTMR_CMP_MASK
+#define YTM32_LPTMR_DEFAULT_TOP      lpTMR_CMP_CMP_MASK
 
 #define YTM32_LPTMR_INSTANCE_VALID(addr) \
-	BUILD_ASSERT((uint32_t)(addr) == YTM32_LPTMR_BASE, \
-		     "LPTMR reg address does not match LPTMR0")
+	BUILD_ASSERT((uint32_t)(addr) == lpTMR0_BASE, \
+		     "LPTMR reg address does not match lpTMR0")
 
+#if defined(YTM32_CLOCK_SRC_LPO)
 #define YTM32_LPTMR_CLOCK_SOURCE_VALID(src) \
 	(((src) == YTM32_CLOCK_SRC_FIRC) || ((src) == YTM32_CLOCK_SRC_SIRC) || \
 	 ((src) == YTM32_CLOCK_SRC_FXOSC) || ((src) == YTM32_CLOCK_SRC_LPO))
@@ -59,8 +42,18 @@
 	 ((src) == YTM32_CLOCK_SRC_SIRC ? YTM32_LPTMR_CLOCK_SEL_SIRC : \
 	  ((src) == YTM32_CLOCK_SRC_FXOSC ? YTM32_LPTMR_CLOCK_SEL_FXOSC : \
 	   YTM32_LPTMR_CLOCK_SEL_LPO)))
+#else
+#define YTM32_LPTMR_CLOCK_SOURCE_VALID(src) \
+	(((src) == YTM32_CLOCK_SRC_FIRC) || ((src) == YTM32_CLOCK_SRC_SIRC) || \
+	 ((src) == YTM32_CLOCK_SRC_FXOSC))
 
-struct ytm32_lptmr_config {
+#define YTM32_LPTMR_CLOCK_SOURCE_SELECT(src) \
+	((src) == YTM32_CLOCK_SRC_FIRC ? YTM32_LPTMR_CLOCK_SEL_FIRC : \
+	 ((src) == YTM32_CLOCK_SRC_SIRC ? YTM32_LPTMR_CLOCK_SEL_SIRC : \
+	  YTM32_LPTMR_CLOCK_SEL_FXOSC))
+#endif
+
+struct counter_ytm32_lptmr_config {
 	struct counter_config_info info;
 	uintptr_t base;
 	const struct device *clock_dev;
@@ -73,7 +66,7 @@ struct ytm32_lptmr_config {
 	uint32_t prescaler_div;
 };
 
-struct ytm32_lptmr_data {
+struct counter_ytm32_lptmr_data {
 	struct k_spinlock lock;
 	uint32_t freq;
 	uint32_t top;
@@ -88,196 +81,186 @@ struct ytm32_lptmr_data {
 	bool sw_irq_pending;
 };
 
-static ALWAYS_INLINE uint32_t ytm32_lptmr_read(uintptr_t base, uint32_t offset)
+static ALWAYS_INLINE lpTMR_Type *counter_ytm32_lptmr_regs(uintptr_t base)
 {
-	return sys_read32(base + offset);
+	return (lpTMR_Type *)base;
 }
 
-static ALWAYS_INLINE void ytm32_lptmr_write(uintptr_t base, uint32_t offset,
-					    uint32_t value)
+static ALWAYS_INLINE void counter_ytm32_lptmr_reg_modify(volatile uint32_t *reg,
+						 uint32_t mask, uint32_t value)
 {
-	sys_write32(value, base + offset);
+	uint32_t r = *reg;
+
+	r &= ~mask;
+	r |= (value & mask);
+	*reg = r;
 }
 
-static ALWAYS_INLINE void ytm32_lptmr_write_mask(uintptr_t base, uint32_t offset,
-						  uint32_t mask,
-						  uint32_t value)
-{
-	uint32_t reg = ytm32_lptmr_read(base, offset);
-
-	reg &= ~mask;
-	reg |= (value & mask);
-	ytm32_lptmr_write(base, offset, reg);
-}
-
-static ALWAYS_INLINE bool ytm32_lptmr_uses_restart_mode(
-	const struct ytm32_lptmr_data *data)
+static ALWAYS_INLINE bool counter_ytm32_lptmr_uses_restart_mode(
+	const struct counter_ytm32_lptmr_data *data)
 {
 	return (data->top != YTM32_LPTMR_DEFAULT_TOP) ||
 	       (data->top_callback != NULL);
 }
 
-static ALWAYS_INLINE bool ytm32_lptmr_irq_required(
-	const struct ytm32_lptmr_data *data)
+static ALWAYS_INLINE bool counter_ytm32_lptmr_irq_required(
+	const struct counter_ytm32_lptmr_data *data)
 {
 	return (data->top_callback != NULL) || data->alarm_active;
 }
 
-static ALWAYS_INLINE void ytm32_lptmr_irq_set_pending(unsigned int irqn)
+static ALWAYS_INLINE void counter_ytm32_lptmr_irq_set_pending(unsigned int irqn)
 {
 	NVIC_SetPendingIRQ((IRQn_Type)irqn);
 }
 
-static ALWAYS_INLINE void ytm32_lptmr_irq_clear_pending(unsigned int irqn)
+static ALWAYS_INLINE void counter_ytm32_lptmr_irq_clear_pending(unsigned int irqn)
 {
 	NVIC_ClearPendingIRQ((IRQn_Type)irqn);
 }
 
-static ALWAYS_INLINE bool ytm32_lptmr_irq_is_pending(unsigned int irqn)
+static ALWAYS_INLINE bool counter_ytm32_lptmr_irq_is_pending(unsigned int irqn)
 {
 	return NVIC_GetPendingIRQ((IRQn_Type)irqn) != 0U;
 }
 
-static ALWAYS_INLINE void ytm32_lptmr_set_enable(uintptr_t base, bool enable)
+static ALWAYS_INLINE void counter_ytm32_lptmr_set_enable(uintptr_t base, bool enable)
 {
-	ytm32_lptmr_write_mask(base, YTM32_LPTMR_CTRL_OFFSET, YTM32_LPTMR_CTRL_EN,
-			       enable ? YTM32_LPTMR_CTRL_EN : 0U);
+	counter_ytm32_lptmr_reg_modify(&counter_ytm32_lptmr_regs(base)->CTRL, lpTMR_CTRL_EN_MASK,
+			       enable ? lpTMR_CTRL_EN_MASK : 0U);
 }
 
-static ALWAYS_INLINE void ytm32_lptmr_set_free_running(uintptr_t base, bool enable)
+static ALWAYS_INLINE void counter_ytm32_lptmr_set_free_running(uintptr_t base, bool enable)
 {
-	ytm32_lptmr_write_mask(base, YTM32_LPTMR_CTRL_OFFSET,
-			       YTM32_LPTMR_CTRL_TMODE,
-			       enable ? YTM32_LPTMR_CTRL_TMODE : 0U);
+	counter_ytm32_lptmr_reg_modify(&counter_ytm32_lptmr_regs(base)->CTRL, lpTMR_CTRL_TMODE_MASK,
+			       enable ? lpTMR_CTRL_TMODE_MASK : 0U);
 }
 
-static ALWAYS_INLINE void ytm32_lptmr_set_timer_mode(uintptr_t base)
+static ALWAYS_INLINE void counter_ytm32_lptmr_set_timer_mode(uintptr_t base)
 {
-	ytm32_lptmr_write_mask(base, YTM32_LPTMR_CTRL_OFFSET,
-			       YTM32_LPTMR_CTRL_MODE, 0U);
+	counter_ytm32_lptmr_reg_modify(&counter_ytm32_lptmr_regs(base)->CTRL, lpTMR_CTRL_MODE_MASK,
+			       0U);
 }
 
-static ALWAYS_INLINE bool ytm32_lptmr_interrupt_enabled(uintptr_t base)
+static ALWAYS_INLINE bool counter_ytm32_lptmr_interrupt_enabled(uintptr_t base)
 {
-	return (ytm32_lptmr_read(base, YTM32_LPTMR_DIE_OFFSET) &
-		YTM32_LPTMR_DIE_IE) != 0U;
+	return (counter_ytm32_lptmr_regs(base)->DIE & lpTMR_DIE_IE_MASK) != 0U;
 }
 
-static ALWAYS_INLINE void ytm32_lptmr_set_interrupt(uintptr_t base, bool enable)
+static ALWAYS_INLINE void counter_ytm32_lptmr_set_interrupt(uintptr_t base, bool enable)
 {
-	ytm32_lptmr_write_mask(base, YTM32_LPTMR_DIE_OFFSET, YTM32_LPTMR_DIE_IE,
-			       enable ? YTM32_LPTMR_DIE_IE : 0U);
+	counter_ytm32_lptmr_reg_modify(&counter_ytm32_lptmr_regs(base)->DIE, lpTMR_DIE_IE_MASK,
+			       enable ? lpTMR_DIE_IE_MASK : 0U);
 }
 
-static ALWAYS_INLINE bool ytm32_lptmr_compare_flag_get(uintptr_t base)
+static ALWAYS_INLINE bool counter_ytm32_lptmr_compare_flag_get(uintptr_t base)
 {
-	return (ytm32_lptmr_read(base, YTM32_LPTMR_STS_OFFSET) &
-		YTM32_LPTMR_STS_CCF) != 0U;
+	return (counter_ytm32_lptmr_regs(base)->STS & lpTMR_STS_CCF_MASK) != 0U;
 }
 
-static ALWAYS_INLINE void ytm32_lptmr_compare_flag_clear(uintptr_t base)
+static ALWAYS_INLINE void counter_ytm32_lptmr_compare_flag_clear(uintptr_t base)
 {
-	ytm32_lptmr_write(base, YTM32_LPTMR_STS_OFFSET,
-			  ytm32_lptmr_read(base, YTM32_LPTMR_STS_OFFSET) |
-			  YTM32_LPTMR_STS_CCF);
+	lpTMR_Type *regs = counter_ytm32_lptmr_regs(base);
+
+	regs->STS = regs->STS | lpTMR_STS_CCF_MASK;
 }
 
-static ALWAYS_INLINE void ytm32_lptmr_set_prescaler(uintptr_t base, uint32_t value)
+static ALWAYS_INLINE void counter_ytm32_lptmr_set_prescaler(uintptr_t base, uint32_t value)
 {
-	ytm32_lptmr_write_mask(base, YTM32_LPTMR_PRS_OFFSET,
-			       YTM32_LPTMR_PRS_PRES_MASK,
-			       FIELD_PREP(YTM32_LPTMR_PRS_PRES_MASK, value));
+	counter_ytm32_lptmr_reg_modify(&counter_ytm32_lptmr_regs(base)->PRS, lpTMR_PRS_PRES_MASK,
+			       FIELD_PREP(lpTMR_PRS_PRES_MASK, value));
 }
 
-static ALWAYS_INLINE void ytm32_lptmr_set_bypass(uintptr_t base, bool enable)
+static ALWAYS_INLINE void counter_ytm32_lptmr_set_bypass(uintptr_t base, bool enable)
 {
-	ytm32_lptmr_write_mask(base, YTM32_LPTMR_PRS_OFFSET,
-			       YTM32_LPTMR_PRS_BYPASS,
-			       enable ? YTM32_LPTMR_PRS_BYPASS : 0U);
+	counter_ytm32_lptmr_reg_modify(&counter_ytm32_lptmr_regs(base)->PRS, lpTMR_PRS_BYPASS_MASK,
+			       enable ? lpTMR_PRS_BYPASS_MASK : 0U);
 }
 
-static ALWAYS_INLINE void ytm32_lptmr_set_clock_source(uintptr_t base, uint32_t source)
+static ALWAYS_INLINE void counter_ytm32_lptmr_set_clock_source(uintptr_t base, uint32_t source)
 {
-	ytm32_lptmr_write_mask(base, YTM32_LPTMR_PRS_OFFSET,
-			       YTM32_LPTMR_PRS_CLKSEL_MASK,
-			       FIELD_PREP(YTM32_LPTMR_PRS_CLKSEL_MASK, source));
+	counter_ytm32_lptmr_reg_modify(&counter_ytm32_lptmr_regs(base)->PRS, lpTMR_PRS_CLKSEL_MASK,
+			       FIELD_PREP(lpTMR_PRS_CLKSEL_MASK, source));
 }
 
-static ALWAYS_INLINE void ytm32_lptmr_set_compare(uintptr_t base, uint32_t value)
+static ALWAYS_INLINE void counter_ytm32_lptmr_set_compare(uintptr_t base, uint32_t value)
 {
-	ytm32_lptmr_write(base, YTM32_LPTMR_CMP_OFFSET, value & YTM32_LPTMR_CMP_MASK);
+	counter_ytm32_lptmr_regs(base)->CMP = value & lpTMR_CMP_CMP_MASK;
 }
 
-static ALWAYS_INLINE uint32_t ytm32_lptmr_get_counter(uintptr_t base)
+static ALWAYS_INLINE uint32_t counter_ytm32_lptmr_get_counter(uintptr_t base)
 {
-	ytm32_lptmr_write(base, YTM32_LPTMR_LCNT_OFFSET, 0U);
+	lpTMR_Type *regs = counter_ytm32_lptmr_regs(base);
 
-	return ytm32_lptmr_read(base, YTM32_LPTMR_CNT_OFFSET) & YTM32_LPTMR_CNT_MASK;
+	regs->LCNT = 0U;
+
+	return regs->CNT & lpTMR_CNT_CVAL_MASK;
 }
 
-static void ytm32_lptmr_program(const struct device *dev, bool running_after)
+static void counter_ytm32_lptmr_program(const struct device *dev, bool running_after)
 {
-	const struct ytm32_lptmr_config *config = dev->config;
-	struct ytm32_lptmr_data *data = dev->data;
+	const struct counter_ytm32_lptmr_config *config = dev->config;
+	struct counter_ytm32_lptmr_data *data = dev->data;
 	uintptr_t base = config->base;
+	lpTMR_Type *regs = counter_ytm32_lptmr_regs(base);
 
-	ytm32_lptmr_set_enable(base, false);
-	ytm32_lptmr_write(base, YTM32_LPTMR_CTRL_OFFSET, 0U);
-	ytm32_lptmr_write(base, YTM32_LPTMR_STS_OFFSET, YTM32_LPTMR_STS_CCF);
-	ytm32_lptmr_write(base, YTM32_LPTMR_DIE_OFFSET, 0U);
-	ytm32_lptmr_write(base, YTM32_LPTMR_PRS_OFFSET, 0U);
-	ytm32_lptmr_write(base, YTM32_LPTMR_CMP_OFFSET, 0U);
+	counter_ytm32_lptmr_set_enable(base, false);
+	regs->CTRL = 0U;
+	regs->STS  = lpTMR_STS_CCF_MASK;
+	regs->DIE  = 0U;
+	regs->PRS  = 0U;
+	regs->CMP  = 0U;
 
-	ytm32_lptmr_set_timer_mode(base);
-	ytm32_lptmr_set_free_running(base, !ytm32_lptmr_uses_restart_mode(data));
-	ytm32_lptmr_set_prescaler(base, config->prescaler_val);
-	ytm32_lptmr_set_bypass(base, config->bypass_prescaler);
-	ytm32_lptmr_set_clock_source(base, config->clock_sel);
-	ytm32_lptmr_set_compare(base, data->top);
-	ytm32_lptmr_set_interrupt(base, ytm32_lptmr_irq_required(data));
+	counter_ytm32_lptmr_set_timer_mode(base);
+	counter_ytm32_lptmr_set_free_running(base, !counter_ytm32_lptmr_uses_restart_mode(data));
+	counter_ytm32_lptmr_set_prescaler(base, config->prescaler_val);
+	counter_ytm32_lptmr_set_bypass(base, config->bypass_prescaler);
+	counter_ytm32_lptmr_set_clock_source(base, config->clock_sel);
+	counter_ytm32_lptmr_set_compare(base, data->top);
+	counter_ytm32_lptmr_set_interrupt(base, counter_ytm32_lptmr_irq_required(data));
 
 	if (running_after) {
-		ytm32_lptmr_set_enable(base, true);
+		counter_ytm32_lptmr_set_enable(base, true);
 	}
 
 	data->running = running_after;
 	data->sw_irq_pending = false;
-	ytm32_lptmr_irq_clear_pending(config->irqn);
+	counter_ytm32_lptmr_irq_clear_pending(config->irqn);
 }
 
-static int ytm32_lptmr_start(const struct device *dev)
+static int counter_ytm32_lptmr_start(const struct device *dev)
 {
-	const struct ytm32_lptmr_config *config = dev->config;
-	struct ytm32_lptmr_data *data = dev->data;
+	const struct counter_ytm32_lptmr_config *config = dev->config;
+	struct counter_ytm32_lptmr_data *data = dev->data;
 	k_spinlock_key_t key = k_spin_lock(&data->lock);
 
 	if (!data->running) {
-		ytm32_lptmr_compare_flag_clear(config->base);
-		ytm32_lptmr_set_interrupt(config->base,
-					 ytm32_lptmr_irq_required(data));
-		ytm32_lptmr_set_enable(config->base, true);
+		counter_ytm32_lptmr_compare_flag_clear(config->base);
+		counter_ytm32_lptmr_set_interrupt(config->base,
+					 counter_ytm32_lptmr_irq_required(data));
+		counter_ytm32_lptmr_set_enable(config->base, true);
 		data->running = true;
 	}
 
 	k_spin_unlock(&data->lock, key);
 
 	if (data->alarm_active && data->sw_irq_pending) {
-		ytm32_lptmr_irq_set_pending(config->irqn);
+		counter_ytm32_lptmr_irq_set_pending(config->irqn);
 	}
 
 	return 0;
 }
 
-static int ytm32_lptmr_stop(const struct device *dev)
+static int counter_ytm32_lptmr_stop(const struct device *dev)
 {
-	const struct ytm32_lptmr_config *config = dev->config;
-	struct ytm32_lptmr_data *data = dev->data;
+	const struct counter_ytm32_lptmr_config *config = dev->config;
+	struct counter_ytm32_lptmr_data *data = dev->data;
 	k_spinlock_key_t key = k_spin_lock(&data->lock);
 
-	ytm32_lptmr_set_interrupt(config->base, false);
-	ytm32_lptmr_set_enable(config->base, false);
-	ytm32_lptmr_compare_flag_clear(config->base);
-	ytm32_lptmr_irq_clear_pending(config->irqn);
+	counter_ytm32_lptmr_set_interrupt(config->base, false);
+	counter_ytm32_lptmr_set_enable(config->base, false);
+	counter_ytm32_lptmr_compare_flag_clear(config->base);
+	counter_ytm32_lptmr_irq_clear_pending(config->irqn);
 
 	data->alarm_active = false;
 	data->alarm_on_top = false;
@@ -291,20 +274,20 @@ static int ytm32_lptmr_stop(const struct device *dev)
 	return 0;
 }
 
-static int ytm32_lptmr_get_value(const struct device *dev, uint32_t *ticks)
+static int counter_ytm32_lptmr_get_value(const struct device *dev, uint32_t *ticks)
 {
-	const struct ytm32_lptmr_config *config = dev->config;
+	const struct counter_ytm32_lptmr_config *config = dev->config;
 
-	*ticks = ytm32_lptmr_get_counter(config->base);
+	*ticks = counter_ytm32_lptmr_get_counter(config->base);
 
 	return 0;
 }
 
-static int ytm32_lptmr_set_alarm(const struct device *dev, uint8_t chan_id,
+static int counter_ytm32_lptmr_set_alarm(const struct device *dev, uint8_t chan_id,
 					 const struct counter_alarm_cfg *alarm_cfg)
 {
-	const struct ytm32_lptmr_config *config = dev->config;
-	struct ytm32_lptmr_data *data = dev->data;
+	const struct counter_ytm32_lptmr_config *config = dev->config;
+	struct counter_ytm32_lptmr_data *data = dev->data;
 	uint32_t top = data->top;
 	uint32_t now;
 	uint32_t target;
@@ -329,7 +312,7 @@ static int ytm32_lptmr_set_alarm(const struct device *dev, uint8_t chan_id,
 		return -EBUSY;
 	}
 
-	if (ytm32_lptmr_uses_restart_mode(data)) {
+	if (counter_ytm32_lptmr_uses_restart_mode(data)) {
 		if (alarm_cfg->ticks != data->top) {
 			k_spin_unlock(&data->lock, key);
 			return -ENOTSUP;
@@ -343,14 +326,14 @@ static int ytm32_lptmr_set_alarm(const struct device *dev, uint8_t chan_id,
 		data->sw_irq_pending = false;
 
 		if (data->running) {
-			ytm32_lptmr_set_interrupt(config->base, true);
+			counter_ytm32_lptmr_set_interrupt(config->base, true);
 		}
 
 		k_spin_unlock(&data->lock, key);
 		return 0;
 	}
 
-	now = ytm32_lptmr_get_counter(config->base);
+	now = counter_ytm32_lptmr_get_counter(config->base);
 	absolute = (alarm_cfg->flags & COUNTER_ALARM_CFG_ABSOLUTE) != 0U;
 	target = absolute ? alarm_cfg->ticks :
 		((now + alarm_cfg->ticks) % (data->top + 1U));
@@ -363,25 +346,25 @@ static int ytm32_lptmr_set_alarm(const struct device *dev, uint8_t chan_id,
 	data->alarm_on_top = false;
 	data->sw_irq_pending = immediate;
 
-	ytm32_lptmr_compare_flag_clear(config->base);
-	ytm32_lptmr_set_compare(config->base, target);
+	counter_ytm32_lptmr_compare_flag_clear(config->base);
+	counter_ytm32_lptmr_set_compare(config->base, target);
 	if (data->running) {
-		ytm32_lptmr_set_interrupt(config->base, true);
+		counter_ytm32_lptmr_set_interrupt(config->base, true);
 	}
 
 	k_spin_unlock(&data->lock, key);
 
 	if (immediate) {
-		ytm32_lptmr_irq_set_pending(config->irqn);
+		counter_ytm32_lptmr_irq_set_pending(config->irqn);
 	}
 
 	return 0;
 }
 
-static int ytm32_lptmr_cancel_alarm(const struct device *dev, uint8_t chan_id)
+static int counter_ytm32_lptmr_cancel_alarm(const struct device *dev, uint8_t chan_id)
 {
-	const struct ytm32_lptmr_config *config = dev->config;
-	struct ytm32_lptmr_data *data = dev->data;
+	const struct counter_ytm32_lptmr_config *config = dev->config;
+	struct counter_ytm32_lptmr_data *data = dev->data;
 	k_spinlock_key_t key;
 
 	ARG_UNUSED(chan_id);
@@ -398,16 +381,16 @@ static int ytm32_lptmr_cancel_alarm(const struct device *dev, uint8_t chan_id)
 	data->alarm_callback = NULL;
 	data->alarm_user_data = NULL;
 	data->sw_irq_pending = false;
-	ytm32_lptmr_irq_clear_pending(config->irqn);
+	counter_ytm32_lptmr_irq_clear_pending(config->irqn);
 
-	if (ytm32_lptmr_uses_restart_mode(data)) {
-		ytm32_lptmr_set_interrupt(config->base,
+	if (counter_ytm32_lptmr_uses_restart_mode(data)) {
+		counter_ytm32_lptmr_set_interrupt(config->base,
 					 data->running &&
 					 (data->top_callback != NULL));
 	} else {
-		ytm32_lptmr_set_interrupt(config->base, false);
-		ytm32_lptmr_compare_flag_clear(config->base);
-		ytm32_lptmr_set_compare(config->base, data->top);
+		counter_ytm32_lptmr_set_interrupt(config->base, false);
+		counter_ytm32_lptmr_compare_flag_clear(config->base);
+		counter_ytm32_lptmr_set_compare(config->base, data->top);
 	}
 
 	k_spin_unlock(&data->lock, key);
@@ -415,10 +398,10 @@ static int ytm32_lptmr_cancel_alarm(const struct device *dev, uint8_t chan_id)
 	return 0;
 }
 
-static int ytm32_lptmr_set_top_value(const struct device *dev,
+static int counter_ytm32_lptmr_set_top_value(const struct device *dev,
 					 const struct counter_top_cfg *cfg)
 {
-	struct ytm32_lptmr_data *data = dev->data;
+	struct counter_ytm32_lptmr_data *data = dev->data;
 	k_spinlock_key_t key;
 	bool running_after;
 
@@ -442,48 +425,48 @@ static int ytm32_lptmr_set_top_value(const struct device *dev,
 	data->top_user_data = cfg->user_data;
 	running_after = data->running;
 
-	ytm32_lptmr_program(dev, running_after);
+	counter_ytm32_lptmr_program(dev, running_after);
 
 	k_spin_unlock(&data->lock, key);
 
 	return 0;
 }
 
-static uint32_t ytm32_lptmr_get_pending_int(const struct device *dev)
+static uint32_t counter_ytm32_lptmr_get_pending_int(const struct device *dev)
 {
-	const struct ytm32_lptmr_config *config = dev->config;
-	const struct ytm32_lptmr_data *data = dev->data;
+	const struct counter_ytm32_lptmr_config *config = dev->config;
+	const struct counter_ytm32_lptmr_data *data = dev->data;
 
-	if (ytm32_lptmr_interrupt_enabled(config->base) &&
-	    ytm32_lptmr_compare_flag_get(config->base)) {
+	if (counter_ytm32_lptmr_interrupt_enabled(config->base) &&
+	    counter_ytm32_lptmr_compare_flag_get(config->base)) {
 		return 1U;
 	}
 
-	if (data->sw_irq_pending && ytm32_lptmr_irq_is_pending(config->irqn)) {
+	if (data->sw_irq_pending && counter_ytm32_lptmr_irq_is_pending(config->irqn)) {
 		return 1U;
 	}
 
 	return 0U;
 }
 
-static uint32_t ytm32_lptmr_get_top_value(const struct device *dev)
+static uint32_t counter_ytm32_lptmr_get_top_value(const struct device *dev)
 {
-	const struct ytm32_lptmr_data *data = dev->data;
+	const struct counter_ytm32_lptmr_data *data = dev->data;
 
 	return data->top;
 }
 
-static uint32_t ytm32_lptmr_get_freq(const struct device *dev)
+static uint32_t counter_ytm32_lptmr_get_freq(const struct device *dev)
 {
-	const struct ytm32_lptmr_data *data = dev->data;
+	const struct counter_ytm32_lptmr_data *data = dev->data;
 
 	return data->freq;
 }
 
-static void ytm32_lptmr_isr(const struct device *dev)
+static void counter_ytm32_lptmr_isr(const struct device *dev)
 {
-	const struct ytm32_lptmr_config *config = dev->config;
-	struct ytm32_lptmr_data *data = dev->data;
+	const struct counter_ytm32_lptmr_config *config = dev->config;
+	struct counter_ytm32_lptmr_data *data = dev->data;
 	counter_alarm_callback_t alarm_cb = NULL;
 	counter_top_callback_t top_cb = NULL;
 	void *alarm_user_data = NULL;
@@ -493,13 +476,13 @@ static void ytm32_lptmr_isr(const struct device *dev)
 	bool compare_flag;
 	k_spinlock_key_t key;
 
-	compare_flag = ytm32_lptmr_compare_flag_get(config->base);
+	compare_flag = counter_ytm32_lptmr_compare_flag_get(config->base);
 	if (compare_flag) {
-		ytm32_lptmr_compare_flag_clear(config->base);
+		counter_ytm32_lptmr_compare_flag_clear(config->base);
 	}
 
 	key = k_spin_lock(&data->lock);
-	top_event = ytm32_lptmr_uses_restart_mode(data);
+	top_event = counter_ytm32_lptmr_uses_restart_mode(data);
 
 	if (data->alarm_active && (!top_event || data->alarm_on_top || data->sw_irq_pending)) {
 		alarm_cb = data->alarm_callback;
@@ -517,7 +500,7 @@ static void ytm32_lptmr_isr(const struct device *dev)
 		top_user_data = data->top_user_data;
 	}
 
-	ytm32_lptmr_set_interrupt(config->base, ytm32_lptmr_irq_required(data));
+	counter_ytm32_lptmr_set_interrupt(config->base, counter_ytm32_lptmr_irq_required(data));
 
 	k_spin_unlock(&data->lock, key);
 
@@ -530,10 +513,10 @@ static void ytm32_lptmr_isr(const struct device *dev)
 	}
 }
 
-static int ytm32_lptmr_init(const struct device *dev)
+static int counter_ytm32_lptmr_init(const struct device *dev)
 {
-	const struct ytm32_lptmr_config *config = dev->config;
-	struct ytm32_lptmr_data *data = dev->data;
+	const struct counter_ytm32_lptmr_config *config = dev->config;
+	struct counter_ytm32_lptmr_data *data = dev->data;
 	int ret;
 
 	if (!device_is_ready(config->clock_dev)) {
@@ -554,22 +537,22 @@ static int ytm32_lptmr_init(const struct device *dev)
 	data->freq /= config->prescaler_div;
 
 	data->top = YTM32_LPTMR_DEFAULT_TOP;
-	ytm32_lptmr_program(dev, false);
+	counter_ytm32_lptmr_program(dev, false);
 	config->irq_config_func(dev);
 
 	return 0;
 }
 
-static DEVICE_API(counter, ytm32_lptmr_api) = {
-	.start = ytm32_lptmr_start,
-	.stop = ytm32_lptmr_stop,
-	.get_value = ytm32_lptmr_get_value,
-	.set_alarm = ytm32_lptmr_set_alarm,
-	.cancel_alarm = ytm32_lptmr_cancel_alarm,
-	.set_top_value = ytm32_lptmr_set_top_value,
-	.get_pending_int = ytm32_lptmr_get_pending_int,
-	.get_top_value = ytm32_lptmr_get_top_value,
-	.get_freq = ytm32_lptmr_get_freq,
+static DEVICE_API(counter, counter_ytm32_lptmr_api) = {
+	.start = counter_ytm32_lptmr_start,
+	.stop = counter_ytm32_lptmr_stop,
+	.get_value = counter_ytm32_lptmr_get_value,
+	.set_alarm = counter_ytm32_lptmr_set_alarm,
+	.cancel_alarm = counter_ytm32_lptmr_cancel_alarm,
+	.set_top_value = counter_ytm32_lptmr_set_top_value,
+	.get_pending_int = counter_ytm32_lptmr_get_pending_int,
+	.get_top_value = counter_ytm32_lptmr_get_top_value,
+	.get_freq = counter_ytm32_lptmr_get_freq,
 };
 
 #define YTM32_LPTMR_PRESCALER_VAL(p) \
@@ -597,14 +580,14 @@ static DEVICE_API(counter, ytm32_lptmr_api) = {
 	BUILD_ASSERT(YTM32_LPTMR_CLOCK_SOURCE_VALID( \
 		DT_INST_PROP(n, ytmicro_functional_clock_source)), \
 		"Unsupported YTM32 LPTMR functional clock source"); \
-	static void ytm32_lptmr_irq_config_##n(const struct device *dev) \
+	static void counter_ytm32_lptmr_irq_config_##n(const struct device *dev) \
 	{ \
 		IRQ_CONNECT(DT_INST_IRQN(n), DT_INST_IRQ(n, priority), \
-			    ytm32_lptmr_isr, DEVICE_DT_INST_GET(n), 0); \
+			    counter_ytm32_lptmr_isr, DEVICE_DT_INST_GET(n), 0); \
 		irq_enable(DT_INST_IRQN(n)); \
 	} \
-	static struct ytm32_lptmr_data ytm32_lptmr_data_##n; \
-	static const struct ytm32_lptmr_config ytm32_lptmr_config_##n = { \
+	static struct counter_ytm32_lptmr_data counter_ytm32_lptmr_data_##n; \
+	static const struct counter_ytm32_lptmr_config counter_ytm32_lptmr_config_##n = { \
 		.info = { \
 			.max_top_value = YTM32_LPTMR_DEFAULT_TOP, \
 			.flags = COUNTER_CONFIG_INFO_COUNT_UP, \
@@ -616,13 +599,13 @@ static DEVICE_API(counter, ytm32_lptmr_api) = {
 		.clock_sel = YTM32_LPTMR_CLOCK_SOURCE_SELECT( \
 			DT_INST_PROP(n, ytmicro_functional_clock_source)), \
 		.irqn = DT_INST_IRQN(n), \
-		.irq_config_func = ytm32_lptmr_irq_config_##n, \
+		.irq_config_func = counter_ytm32_lptmr_irq_config_##n, \
 		.prescaler_val = YTM32_LPTMR_PRESCALER_VAL(DT_INST_PROP(n, ytmicro_prescaler)), \
 		.bypass_prescaler = YTM32_LPTMR_PRESCALER_BYPASS(DT_INST_PROP(n, ytmicro_prescaler)), \
 		.prescaler_div = DT_INST_PROP(n, ytmicro_prescaler), \
 	}; \
-	DEVICE_DT_INST_DEFINE(n, ytm32_lptmr_init, NULL, &ytm32_lptmr_data_##n, \
-			      &ytm32_lptmr_config_##n, POST_KERNEL, \
-			      CONFIG_COUNTER_INIT_PRIORITY, &ytm32_lptmr_api);
+	DEVICE_DT_INST_DEFINE(n, counter_ytm32_lptmr_init, NULL, &counter_ytm32_lptmr_data_##n, \
+			      &counter_ytm32_lptmr_config_##n, POST_KERNEL, \
+			      CONFIG_COUNTER_INIT_PRIORITY, &counter_ytm32_lptmr_api);
 
 DT_INST_FOREACH_STATUS_OKAY(YTM32_LPTMR_INIT)

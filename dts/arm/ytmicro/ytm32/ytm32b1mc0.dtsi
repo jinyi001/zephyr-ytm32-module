@@ -4,7 +4,7 @@
  */
 
 #include <arm/armv8-m.dtsi>
-#include <zephyr/dt-bindings/clock/ytmicro,ytm32-clock.h>
+#include <zephyr/dt-bindings/clock/ytmicro,ytm32b1mc0-clock.h>
 
 / {
 	model = "YTMicro YTM32B1MC0";
@@ -26,6 +26,9 @@
 	cgu: cgu {
 		compatible = "ytmicro,ytm32-cgu";
 		#clock-cells = <1>;
+		/* Hardware-fixed oscillator frequencies (RM §12.1): */
+		firc-frequency = <80000000>;   /* FIRC: fixed 80 MHz */
+		sirc-frequency = <12000000>;   /* SIRC: fixed 12 MHz */
 		status = "okay";
 	};
 
@@ -77,6 +80,17 @@
 			interrupts = <22 0>;
 			clocks = <&cgu YTM32_CLOCK_WDG0>;
 			ytmicro,timeout-clock-source = <0>;
+			status = "disabled";
+		};
+
+		adc0: adc@40040000 {
+			compatible = "ytmicro,ytm32-adc";
+			reg = <0x40040000 0x58>;
+			interrupts = <39 0>;
+			clocks = <&cgu YTM32_CLOCK_ADC0>;
+			ytmicro,functional-clock-source = <YTM32_CLOCK_SRC_FXOSC>;
+			ytmicro,functional-clock-divider = <3>;
+			#io-channel-cells = <1>;
 			status = "disabled";
 		};
 

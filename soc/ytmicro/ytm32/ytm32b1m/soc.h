@@ -6,7 +6,11 @@
 #ifndef SOC_H_
 #define SOC_H_
 
+#if defined(CONFIG_SOC_YTM32B1MD1)
+#include <YTM32B1MD1.h>
+#else
 #include <YTM32B1MC0.h>
+#endif
 
 /* CMSIS Compatibility */
 #define SVCall_IRQn SVC_IRQn

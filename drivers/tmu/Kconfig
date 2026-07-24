@@ -1,0 +1,27 @@
+# Copyright (c) 2026 YI JIN <jinyi_2001@foxmail.com>
+# SPDX-License-Identifier: Apache-2.0
+
+config YTM32_TMU
+	bool "YTM32 TMU (Trigger MUX Unit) driver"
+	default y
+	depends on DT_HAS_YTMICRO_YTM32_TMU_ENABLED
+	help
+	  Enable the YTM32 TMU driver.  It owns the TMU peripheral clock,
+	  applies the static trigger routes described in devicetree, and
+	  exposes ytm32_tmu_route() for runtime routing (used e.g. by the ADC
+	  driver to wire an eTMR trigger to the ADC external-trigger input).
+
+if YTM32_TMU
+
+config YTM32_TMU_INIT_PRIORITY
+	int "YTM32 TMU init priority"
+	default 45
+	help
+	  Device initialization priority for the TMU driver.  Must run after
+	  the clock-control driver so the TMU clock gate can be enabled.
+
+module = YTM32_TMU
+module-str = YTM32 TMU
+source "subsys/logging/Kconfig.template.log_config"
+
+endif # YTM32_TMU

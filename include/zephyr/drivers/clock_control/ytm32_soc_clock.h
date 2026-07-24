@@ -24,9 +24,21 @@
 #define YTM32_SIRC_STANDBY_ENABLED \
 	IS_ENABLED(CONFIG_CLOCK_CONTROL_YTM32_KEEP_SIRC_IN_STANDBY)
 
-int ytm32_soc_apply_clock_config(uint32_t core_clock,
-				 uint32_t core_divider,
-				 uint32_t fast_bus_divider,
-				 uint32_t slow_bus_divider);
+struct ytm32_soc_clock_config {
+	uint32_t system_clock_source;
+	uint32_t fxosc_frequency;
+	bool fxosc_bypass;
+	uint8_t fxosc_gain_selection;
+	/* PLL configuration — only consulted when system_clock_source is PLL. */
+	uint32_t pll_reference_clock;	/* YTM32_PLL_REF_* (FXOSC / FIRC)        */
+	uint32_t pll_feedback_divider;	/* Ndiv / FBDIV, valid 10–63             */
+	uint32_t pll_reference_divider;	/* Npre / REFDIV, valid 1 or 3–16        */
+	uint32_t core_clock;
+	uint32_t core_divider;
+	uint32_t fast_bus_divider;
+	uint32_t slow_bus_divider;
+};
+
+int ytm32_soc_apply_clock_config(const struct ytm32_soc_clock_config *cfg);
 
 #endif /* ZEPHYR_INCLUDE_DRIVERS_CLOCK_CONTROL_YTM32_SOC_CLOCK_H_ */

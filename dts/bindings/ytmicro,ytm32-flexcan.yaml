@@ -1,0 +1,57 @@
+description: YTMicro YTM32 FlexCAN controller
+
+compatible: "ytmicro,ytm32-flexcan"
+
+include: [can-controller.yaml, pinctrl-device.yaml]
+
+properties:
+  reg:
+    required: true
+
+  interrupts:
+    required: true
+
+  interrupt-names:
+    type: string-array
+    required: true
+
+  clocks:
+    type: phandle-array
+    required: true
+    description: FlexCAN peripheral clock specifier from the CGU.
+
+  ytmicro,functional-clock-source:
+    type: int
+    required: true
+    description: Functional clock source passed to the YTM32 clock controller.
+
+  ytmicro,functional-clock-divider:
+    type: int
+    required: false
+    default: 1
+    description: Functional clock divider passed to the YTM32 clock controller.
+
+  max-mb:
+    type: int
+    required: true
+    description: Number of FlexCAN message buffers available on this instance.
+
+  rx-mb-count:
+    type: int
+    required: false
+    default: 8
+    description: Number of message buffers reserved for Zephyr RX filters.
+
+  tx-mb-count:
+    type: int
+    required: false
+    default: 4
+    description: Number of message buffers reserved for Zephyr TX operations.
+
+  supports-fd:
+    type: boolean
+    description: This instance supports CAN FD.
+
+  supports-enhanced-rx-fifo:
+    type: boolean
+    description: This instance supports the enhanced RX FIFO block.

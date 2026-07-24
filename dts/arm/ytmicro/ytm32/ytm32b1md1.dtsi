@@ -1,0 +1,412 @@
+/*
+ * Copyright (c) 2026 YI JIN <jinyi_2001@foxmail.com>
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+#include <arm/armv8-m.dtsi>
+#include <zephyr/dt-bindings/clock/ytmicro,ytm32b1md1-clock.h>
+#include <zephyr/dt-bindings/tmu/ytm32b1md1-tmu.h>
+
+/ {
+	model = "YTMicro YTM32B1MD1";
+	compatible = "ytm,ytm32b1md1";
+
+	cpus {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		cpu0: cpu@0 {
+			device_type = "cpu";
+			compatible = "arm,cortex-m33";
+			reg = <0>;
+			#address-cells = <1>;
+			#size-cells = <1>;
+		};
+	};
+
+	cgu: cgu {
+		compatible = "ytmicro,ytm32-cgu";
+		#clock-cells = <1>;
+		/* Hardware-fixed oscillator frequencies (RM §12.1): */
+		firc-frequency = <96000000>;   /* FIRC: fixed 96 MHz */
+		sirc-frequency = <12000000>;   /* SIRC: fixed 12 MHz */
+		/* Board-selectable clock configuration defaults: */
+		system-clock-source = <YTM32_SYSTEM_CLOCK_SRC_FXOSC>;
+		fxosc-frequency = <16000000>;  /* override in board DTS for actual crystal */
+		core-clock = <16000000>;       /* = fxosc-frequency / core-divider */
+		core-divider = <1>;
+		fast-bus-divider = <1>;
+		slow-bus-divider = <2>;
+		status = "okay";
+	};
+
+	pinctrl: pinctrl {
+		compatible = "ytmicro,ytm32-pinctrl";
+		clocks = <&cgu YTM32_CLOCK_PCTRLA>,
+			 <&cgu YTM32_CLOCK_PCTRLB>,
+			 <&cgu YTM32_CLOCK_PCTRLC>,
+			 <&cgu YTM32_CLOCK_PCTRLD>,
+			 <&cgu YTM32_CLOCK_PCTRLE>,
+			 <&cgu YTM32_CLOCK_GPIO>;
+		status = "okay";
+	};
+
+	soc {
+		efm: flash-controller@40010000 {
+			compatible = "ytmicro,ytm32-flash-controller";
+			reg = <0x40010000 0x1000>;
+			#address-cells = <1>;
+			#size-cells = <1>;
+			status = "okay";
+
+			flash0: flash@0 {
+				compatible = "soc-nv-flash";
+				reg = <0x00000000 0x80000>;
+				erase-block-size = <1024>;
+				write-block-size = <8>;
+			};
+		};
+
+		sram0: memory@1fff8000 {
+			compatible = "mmio-sram";
+			reg = <0x1fff8000 0x10000>;
+		};
+
+		uart0: uart@4001b000 {
+			compatible = "ytmicro,ytm32-uart";
+			reg = <0x4001b000 0x1000>;
+			interrupts = <31 0>;
+			clocks = <&cgu YTM32_CLOCK_LINFLEXD0>;
+			ytmicro,functional-clock-source = <YTM32_CLOCK_SRC_FXOSC>;
+			ytmicro,functional-clock-divider = <1>;
+			status = "disabled";
+		};
+
+		uart1: uart@4001c000 {
+			compatible = "ytmicro,ytm32-uart";
+			reg = <0x4001c000 0x1000>;
+			interrupts = <33 0>;
+			clocks = <&cgu YTM32_CLOCK_LINFLEXD1>;
+			ytmicro,functional-clock-source = <YTM32_CLOCK_SRC_FXOSC>;
+			ytmicro,functional-clock-divider = <1>;
+			status = "disabled";
+		};
+
+		uart2: uart@4001d000 {
+			compatible = "ytmicro,ytm32-uart";
+			reg = <0x4001d000 0x1000>;
+			interrupts = <35 0>;
+			clocks = <&cgu YTM32_CLOCK_LINFLEXD2>;
+			ytmicro,functional-clock-source = <YTM32_CLOCK_SRC_FXOSC>;
+			ytmicro,functional-clock-divider = <1>;
+			status = "disabled";
+		};
+
+		wdog0: watchdog@4006a000 {
+			compatible = "ytmicro,ytm32-wdg";
+			reg = <0x4006a000 0x1000>;
+			interrupts = <22 0>;
+			clocks = <&cgu YTM32_CLOCK_WDG0>;
+			ytmicro,timeout-clock-source = <0>;
+			status = "disabled";
+		};
+
+		can0: can@40030000 {
+			compatible = "ytmicro,ytm32-flexcan";
+			reg = <0x40030000 0x4000>;
+			interrupts = <78 0>, <79 0>, <80 0>,
+				     <81 0>, <82 0>, <83 0>, <84 0>;
+			interrupt-names = "ored", "error", "wakeup",
+					  "mb_0_15", "mb_16_31",
+					  "mb_32_47", "mb_48_63";
+			clocks = <&cgu YTM32_CLOCK_FLEXCAN0>;
+			ytmicro,functional-clock-source = <YTM32_CLOCK_SRC_FXOSC>;
+			ytmicro,functional-clock-divider = <1>;
+			max-mb = <64>;
+			rx-mb-count = <8>;
+			tx-mb-count = <4>;
+			supports-fd;
+			supports-enhanced-rx-fifo;
+			status = "disabled";
+		};
+
+		can1: can@40034000 {
+			compatible = "ytmicro,ytm32-flexcan";
+			reg = <0x40034000 0x4000>;
+			interrupts = <85 0>, <86 0>, <87 0>,
+				     <88 0>, <89 0>;
+			interrupt-names = "ored", "error", "wakeup",
+					  "mb_0_15", "mb_16_31";
+			clocks = <&cgu YTM32_CLOCK_FLEXCAN1>;
+			ytmicro,functional-clock-source = <YTM32_CLOCK_SRC_FXOSC>;
+			ytmicro,functional-clock-divider = <1>;
+			max-mb = <32>;
+			rx-mb-count = <8>;
+			tx-mb-count = <4>;
+			supports-fd;
+			status = "disabled";
+		};
+
+		can2: can@40038000 {
+			compatible = "ytmicro,ytm32-flexcan";
+			reg = <0x40038000 0x4000>;
+			interrupts = <92 0>, <93 0>, <94 0>,
+				     <95 0>, <96 0>;
+			interrupt-names = "ored", "error", "wakeup",
+					  "mb_0_15", "mb_16_31";
+			clocks = <&cgu YTM32_CLOCK_FLEXCAN2>;
+			ytmicro,functional-clock-source = <YTM32_CLOCK_SRC_FXOSC>;
+			ytmicro,functional-clock-divider = <1>;
+			max-mb = <32>;
+			rx-mb-count = <8>;
+			tx-mb-count = <4>;
+			supports-fd;
+			status = "disabled";
+		};
+
+		adc0: adc@40040000 {
+			compatible = "ytmicro,ytm32-adc";
+			reg = <0x40040000 0x58>;
+			interrupts = <39 0>;
+			clocks = <&cgu YTM32_CLOCK_ADC0>;
+			/* IPC clock: FIRC (96 MHz) / 6 = 16 MHz (crystal-independent).
+			 * ADC internal divider (ytmicro,adc-clock-divider = 2 by default):
+			 *   CFG1.PRS = 2 → divide by 3 (n+1 semantics) → FADC = 5.33 MHz.
+			 * Driver runtime assertion: FADC must be in [2, 32] MHz.
+			 * Factory frontend (sdk.json adc_func_clk): func_clk in [4, 32] MHz.
+			 * Datasheet DS v1.8 §6.4.5: FADC spec max 2 MHz.
+			 * The SDK default (5.33 MHz) is the factory-intended configuration.
+			 */
+			ytmicro,functional-clock-source = <YTM32_CLOCK_SRC_FIRC>;
+			ytmicro,functional-clock-divider = <6>;
+			/* ytmicro,adc-clock-divider = <2> is the binding default (÷3, n+1). */
+			#io-channel-cells = <1>;
+			status = "disabled";
+			/* DMA channel, hw-trigger-source, tmu, and cim-trigger-select
+			 * are board-level resource decisions — set them in board DTS.
+			 */
+		};
+
+		tmu0: tmu@40048000 {
+			compatible = "ytmicro,ytm32-tmu";
+			reg = <0x40048000 0x1000>;
+			clocks = <&cgu YTM32_CLOCK_TMU>;
+			status = "okay";
+		};
+
+		etmr0: etmr@40049000 {
+			compatible = "ytmicro,ytm32-etmr-pwm";
+			reg = <0x40049000 0x1000>;
+			interrupts = <99 0>, <100 0>, <101 0>, <102 0>, <103 0>, <104 0>;
+			interrupt-names = "ch01", "ch23", "ch45", "ch67", "fault", "ovf";
+			clocks = <&cgu YTM32_CLOCK_ETMR0>;
+			ytmicro,instance = <0>;
+			ytmicro,functional-clock-source = <YTM32_CLOCK_SRC_FIRC>;
+			ytmicro,functional-clock-divider = <1>;
+			status = "disabled";
+			#pwm-cells = <3>;
+		};
+
+		etmr1: etmr@4004a000 {
+			compatible = "ytmicro,ytm32-etmr-pwm";
+			reg = <0x4004a000 0x1000>;
+			interrupts = <105 0>, <106 0>, <107 0>, <108 0>, <109 0>, <110 0>;
+			interrupt-names = "ch01", "ch23", "ch45", "ch67", "fault", "ovf";
+			clocks = <&cgu YTM32_CLOCK_ETMR1>;
+			ytmicro,instance = <1>;
+			ytmicro,functional-clock-source = <YTM32_CLOCK_SRC_FIRC>;
+			ytmicro,functional-clock-divider = <1>;
+			status = "disabled";
+			#pwm-cells = <3>;
+		};
+
+		etmr2: etmr@4004b000 {
+			compatible = "ytmicro,ytm32-etmr-pwm";
+			reg = <0x4004b000 0x1000>;
+			interrupts = <111 0>, <112 0>, <113 0>, <114 0>, <115 0>, <116 0>;
+			interrupt-names = "ch01", "ch23", "ch45", "ch67", "fault", "ovf";
+			clocks = <&cgu YTM32_CLOCK_ETMR2>;
+			ytmicro,instance = <2>;
+			ytmicro,functional-clock-source = <YTM32_CLOCK_SRC_FIRC>;
+			ytmicro,functional-clock-divider = <1>;
+			status = "disabled";
+			#pwm-cells = <3>;
+		};
+
+		etmr3: etmr@4004c000 {
+			compatible = "ytmicro,ytm32-etmr-pwm";
+			reg = <0x4004c000 0x1000>;
+			interrupts = <117 0>, <118 0>, <119 0>, <120 0>, <121 0>, <122 0>;
+			interrupt-names = "ch01", "ch23", "ch45", "ch67", "fault", "ovf";
+			clocks = <&cgu YTM32_CLOCK_ETMR3>;
+			ytmicro,instance = <3>;
+			ytmicro,functional-clock-source = <YTM32_CLOCK_SRC_FIRC>;
+			ytmicro,functional-clock-divider = <1>;
+			status = "disabled";
+			#pwm-cells = <3>;
+		};
+
+		lptmr0: lptmr@4005d000 {
+			compatible = "ytmicro,ytm32-lptmr";
+			reg = <0x4005d000 0x1000>;
+			interrupts = <58 0>;
+			clocks = <&cgu YTM32_CLOCK_LPTMR0>;
+			ytmicro,functional-clock-source = <YTM32_CLOCK_SRC_FXOSC>;
+			ytmicro,prescaler = <1024>;
+			status = "disabled";
+		};
+
+		dma0: dma@40008000 {
+			compatible = "ytmicro,ytm32-dma";
+			reg = <0x40008000 0x1000>;
+			/*
+			 * 16 per-channel IRQs (DMA0_IRQn=0 .. DMA15_IRQn=15)
+			 * followed by the shared error IRQ (DMA_Error_IRQn=16).
+			 */
+			interrupts = < 0 2>, < 1 2>, < 2 2>, < 3 2>,
+			             < 4 2>, < 5 2>, < 6 2>, < 7 2>,
+			             < 8 2>, < 9 2>, <10 2>, <11 2>,
+			             <12 2>, <13 2>, <14 2>, <15 2>,
+			             <16 2>;
+			clocks = <&cgu YTM32_CLOCK_DMA>;
+			dma-channels = <16>;
+			#dma-cells = <2>;
+			status = "disabled";
+		};
+
+		/*
+		 * Default DMA channel assignments (board overlay may override):
+		 *   SPI0: ch0/TX(trigsrc=15)  ch1/RX(trigsrc=14)
+		 *   SPI1: ch2/TX(trigsrc=17)  ch3/RX(trigsrc=16)
+		 *   SPI2: ch4/TX(trigsrc=19)  ch5/RX(trigsrc=18)
+		 *   SPI3: ch6/TX(trigsrc=61)  ch7/RX(trigsrc=60)
+		 * DMA is gated by dma0's status; keep dma0 disabled here and
+		 * enable it in the board DTS to activate DMA mode.
+		 */
+		spi0: spi@4002a000 {
+				compatible = "ytmicro,ytm32-spi";
+				reg = <0x4002a000 0x1000>;
+				interrupts = <26 0>;
+				clocks = <&cgu YTM32_CLOCK_SPI0>;
+				ytmicro,functional-clock-source = <YTM32_CLOCK_SRC_FIRC>;
+				ytmicro,functional-clock-divider = <1>;
+				#address-cells = <1>;
+				#size-cells = <0>;
+				dmas = <&dma0 0 15>, <&dma0 1 14>;
+				dma-names = "tx", "rx";
+				status = "disabled";
+			};
+
+			spi1: spi@4002b000 {
+				compatible = "ytmicro,ytm32-spi";
+				reg = <0x4002b000 0x1000>;
+				interrupts = <27 0>;
+				clocks = <&cgu YTM32_CLOCK_SPI1>;
+				ytmicro,functional-clock-source = <YTM32_CLOCK_SRC_FIRC>;
+				ytmicro,functional-clock-divider = <1>;
+				#address-cells = <1>;
+				#size-cells = <0>;
+				dmas = <&dma0 2 17>, <&dma0 3 16>;
+				dma-names = "tx", "rx";
+				status = "disabled";
+			};
+
+			spi2: spi@4002c000 {
+				compatible = "ytmicro,ytm32-spi";
+				reg = <0x4002c000 0x1000>;
+				interrupts = <28 0>;
+				clocks = <&cgu YTM32_CLOCK_SPI2>;
+				ytmicro,functional-clock-source = <YTM32_CLOCK_SRC_FIRC>;
+				ytmicro,functional-clock-divider = <1>;
+				#address-cells = <1>;
+				#size-cells = <0>;
+				dmas = <&dma0 4 19>, <&dma0 5 18>;
+				dma-names = "tx", "rx";
+				status = "disabled";
+			};
+
+			spi3: spi@4002d000 {
+				compatible = "ytmicro,ytm32-spi";
+				reg = <0x4002d000 0x1000>;
+				interrupts = <168 0>;
+				clocks = <&cgu YTM32_CLOCK_SPI3>;
+				ytmicro,functional-clock-source = <YTM32_CLOCK_SRC_FIRC>;
+				ytmicro,functional-clock-divider = <1>;
+				#address-cells = <1>;
+				#size-cells = <0>;
+				dmas = <&dma0 6 61>, <&dma0 7 60>;
+				dma-names = "tx", "rx";
+				status = "disabled";
+			};
+
+			gpioa: gpio@40011000 {
+			compatible = "ytmicro,ytm32-gpio";
+			reg = <0x40011000 0x100>,  /* GPIO */
+			      <0x40012000 0x100>;  /* PCTRLA */
+			reg-names = "gpio", "pctrl";
+			interrupts = <59 0>;
+			gpio-controller;
+			#gpio-cells = <2>;
+			ngpios = <32>;
+			clocks = <&cgu YTM32_CLOCK_GPIO>;
+			status = "disabled";
+		};
+
+		gpiob: gpio@40011100 {
+			compatible = "ytmicro,ytm32-gpio";
+			reg = <0x40011100 0x100>,  /* GPIO */
+			      <0x40013000 0x100>;  /* PCTRLB */
+			reg-names = "gpio", "pctrl";
+			interrupts = <60 0>;
+			gpio-controller;
+			#gpio-cells = <2>;
+			ngpios = <32>;
+			clocks = <&cgu YTM32_CLOCK_GPIO>;
+			status = "disabled";
+		};
+
+		gpioc: gpio@40011200 {
+			compatible = "ytmicro,ytm32-gpio";
+			reg = <0x40011200 0x100>,  /* GPIO */
+			      <0x40014000 0x100>;  /* PCTRLC */
+			reg-names = "gpio", "pctrl";
+			interrupts = <61 0>;
+			gpio-controller;
+			#gpio-cells = <2>;
+			ngpios = <32>;
+			clocks = <&cgu YTM32_CLOCK_GPIO>;
+			status = "disabled";
+		};
+
+		gpiod: gpio@40011300 {
+			compatible = "ytmicro,ytm32-gpio";
+			reg = <0x40011300 0x100>,  /* GPIO */
+			      <0x40015000 0x100>;  /* PCTRLD */
+			reg-names = "gpio", "pctrl";
+			interrupts = <62 0>;
+			gpio-controller;
+			#gpio-cells = <2>;
+			ngpios = <32>;
+			clocks = <&cgu YTM32_CLOCK_GPIO>;
+			status = "disabled";
+		};
+
+		gpioe: gpio@40011400 {
+			compatible = "ytmicro,ytm32-gpio";
+			reg = <0x40011400 0x100>,  /* GPIO */
+			      <0x40016000 0x100>;  /* PCTRLE */
+			reg-names = "gpio", "pctrl";
+			interrupts = <63 0>;
+			gpio-controller;
+			#gpio-cells = <2>;
+			ngpios = <32>;
+			clocks = <&cgu YTM32_CLOCK_GPIO>;
+			status = "disabled";
+		};
+
+	};
+};
+
+&nvic {
+	arm,num-irq-priority-bits = <3>;
+};

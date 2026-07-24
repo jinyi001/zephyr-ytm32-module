@@ -1,0 +1,22 @@
+config CAN_YTM32
+	bool "YTM32 FlexCAN driver"
+	default y
+	depends on DT_HAS_YTMICRO_YTM32_FLEXCAN_ENABLED
+	select CAN
+	help
+	  Enable the YTMicro YTM32 FlexCAN controller driver.
+
+config CAN_MAX_FILTER
+	int "Maximum number of concurrent CAN RX filters"
+	default 8
+	depends on CAN_YTM32
+	help
+	  Maximum number of simultaneously active CAN RX filters per device.
+	  Must not exceed the rx-mb-count property of the FlexCAN node.
+
+config CAN_YTM32_TX_TIMEOUT_MS
+	int "YTM32 CAN TX timeout in milliseconds"
+	default 1000
+	depends on CAN_YTM32
+	help
+	  Timeout used for blocking CAN transmissions.
