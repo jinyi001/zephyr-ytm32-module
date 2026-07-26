@@ -11,61 +11,97 @@
 #endif
 #include "device_registers.h"
 #include "clock.h"
+#include "cmu_threshold.h"
 #include <zephyr/init.h>
 #include <zephyr/dt-bindings/clock/ytmicro,ytm32-soc-clock.h>
 #include <zephyr/drivers/clock_control/ytm32_soc_clock.h>
 
 /* YTM32_FIRC_HZ and YTM32_FXOSC_HZ are provided by the active SoC clock binding. */
 
+/*
+ * The CMU HAL's default helper uses FEATURE_SCU_SIRC_FREQ in Hz.  Use the
+ * same SDK definition here: it is the clock actually selected by
+ * CMU_REF_SIRC_CLOCK (and is 12 MHz on the normal MD1 build, not 32 kHz).
+ * This also preserves the MC0 SDK value, whose SIRC definition is 2 MHz.
+ */
+#define YTM32_CMU_FIRC_HZ FEATURE_SCU_FIRC_FREQ
+#define YTM32_CMU_SIRC_HZ FEATURE_SCU_SIRC_FREQ
+
 #define YTM32_CLOCK_CONFIG_COUNT 1U
 #define YTM32_CLOCK_CONFIG_INDEX 0U
 
 /*
- * CMU comparison thresholds for FIRC/FXOSC monitoring:
- *
- *   Reference clock: SIRC (32 kHz typical)
- *   Monitored clocks: FIRC (80 MHz nominal), FXOSC (24 MHz nominal)
- *
- * CMU counts 128 reference cycles and compares the monitored clock edges
- * seen in that window. The vendor SDK expresses the threshold values as
- * (target_ratio * 128) / 2, so the chosen values map to these windows:
- *
- *   FIRC compareHigh = (100 * 128) / 2 = 6400   -> allow up to 100 MHz
- *   FIRC compareLow  = ( 60 * 128) / 2 = 3840   -> alarm below 60 MHz
- *   FXOSC compareHigh = (30 * 128) / 2 = 1920   -> allow up to 30 MHz
- *   FXOSC compareLow  = (18 * 128) / 2 = 1152   -> alarm below 18 MHz
- *   PLL  compareHigh = (150 * 128) / 2 = 9600   -> allow up to 150 MHz
- *   PLL  compareLow  = ( 90 * 128) / 2 = 5760   -> alarm below  90 MHz
- *
- * The PLL channel only exists when the SoC supports PLL; it is monitored
- * only when the PLL is actually used as the system clock source (otherwise
- * the channel stays disabled and the compare values are inert).
+ * The SDK formula is +/-25% over 128 SIRC reference cycles.  The helper keeps
+ * the SDK's MHz truncation and integer-division order, with 64-bit
+ * intermediates for the widened arithmetic.
  */
-static const cmu_config_t ytm32_cmu_config = {
-	.fircClockMonitor = {
-		.enable = YTM32_CMU_ENABLED,
-		.resetEnable = YTM32_CMU_RESET_ENABLED,
-		.refClock = CMU_REF_SIRC_CLOCK,
-		.compareHigh = (100U * 128U) / 2U,
-		.compareLow = (60U * 128U) / 2U,
-	},
+static int ytm32_cmu_configure(const struct ytm32_soc_clock_config *cfg,
+				       cmu_config_t *cmu_config)
+{
+	struct ytm32_cmu_thresholds thresholds;
+	uint32_t pll_hz;
+	bool fxosc_enabled;
+
+	if ((cfg == NULL) || (cmu_config == NULL)) {
+		return -EINVAL;
+	}
+
+	*cmu_config = (cmu_config_t){0};
+	cmu_config->fircClockMonitor.enable = YTM32_CMU_ENABLED;
+	cmu_config->fircClockMonitor.resetEnable = YTM32_CMU_RESET_ENABLED;
+	cmu_config->fircClockMonitor.refClock = CMU_REF_SIRC_CLOCK;
+	if (!ytm32_cmu_thresholds_from_hz(YTM32_CMU_FIRC_HZ,
+						  YTM32_CMU_SIRC_HZ, &thresholds)) {
+		return -EINVAL;
+	}
+	cmu_config->fircClockMonitor.compareHigh = thresholds.compare_high;
+	cmu_config->fircClockMonitor.compareLow = thresholds.compare_low;
+
+	fxosc_enabled =
+		cfg->system_clock_source == YTM32_SYSTEM_CLOCK_SRC_FXOSC;
 #if defined(FEATURE_SCU_SUPPORT_PLL) && FEATURE_SCU_SUPPORT_PLL
-	.pllClockMonitor = {
-		.enable = YTM32_CMU_ENABLED,
-		.resetEnable = YTM32_CMU_RESET_ENABLED,
-		.refClock = CMU_REF_SIRC_CLOCK,
-		.compareHigh = (150U * 128U) / 2U,
-		.compareLow = (90U * 128U) / 2U,
-	},
+	fxosc_enabled |=
+		(cfg->system_clock_source == YTM32_SYSTEM_CLOCK_SRC_PLL) &&
+		(cfg->pll_reference_clock == YTM32_PLL_REF_FXOSC);
 #endif /* FEATURE_SCU_SUPPORT_PLL */
-	.fxoscClockMonitor = {
-		.enable = YTM32_CMU_ENABLED,
-		.resetEnable = YTM32_CMU_RESET_ENABLED,
-		.refClock = CMU_REF_SIRC_CLOCK,
-		.compareHigh = (30U * 128U) / 2U,
-		.compareLow = (18U * 128U) / 2U,
-	},
-};
+	cmu_config->fxoscClockMonitor.enable =
+		YTM32_CMU_ENABLED && fxosc_enabled;
+	cmu_config->fxoscClockMonitor.resetEnable =
+		YTM32_CMU_RESET_ENABLED && fxosc_enabled;
+	cmu_config->fxoscClockMonitor.refClock = CMU_REF_SIRC_CLOCK;
+	if (fxosc_enabled) {
+		if (!ytm32_cmu_thresholds_from_hz(cfg->fxosc_frequency,
+						  YTM32_CMU_SIRC_HZ, &thresholds)) {
+			return -EINVAL;
+		}
+		cmu_config->fxoscClockMonitor.compareHigh = thresholds.compare_high;
+		cmu_config->fxoscClockMonitor.compareLow = thresholds.compare_low;
+	}
+
+#if defined(FEATURE_SCU_SUPPORT_PLL) && FEATURE_SCU_SUPPORT_PLL
+	cmu_config->pllClockMonitor.refClock = CMU_REF_SIRC_CLOCK;
+	if (cfg->system_clock_source == YTM32_SYSTEM_CLOCK_SRC_PLL) {
+		if (!ytm32_cmu_pll_output_hz(
+				(cfg->pll_reference_clock == YTM32_PLL_REF_FIRC)
+					? YTM32_CMU_FIRC_HZ
+					: cfg->fxosc_frequency,
+				cfg->pll_reference_divider, cfg->pll_feedback_divider,
+				&pll_hz) ||
+		    !ytm32_cmu_thresholds_from_hz(pll_hz, YTM32_CMU_SIRC_HZ,
+						      &thresholds)) {
+			return -EINVAL;
+		}
+		cmu_config->pllClockMonitor.enable = YTM32_CMU_ENABLED;
+		cmu_config->pllClockMonitor.resetEnable = YTM32_CMU_RESET_ENABLED;
+		cmu_config->pllClockMonitor.compareHigh = thresholds.compare_high;
+		cmu_config->pllClockMonitor.compareLow = thresholds.compare_low;
+	}
+#else
+	ARG_UNUSED(pll_hz);
+#endif /* FEATURE_SCU_SUPPORT_PLL */
+
+	return 0;
+}
 
 static bool ytm32_divider_to_sys_div(uint32_t divider, uint8_t *sys_div)
 {
@@ -85,12 +121,17 @@ static bool ytm32_divider_to_sys_div(uint32_t divider, uint8_t *sys_div)
  */
 static uint32_t ytm32_pll_output_hz(const struct ytm32_soc_clock_config *cfg)
 {
+	uint32_t pll_hz;
 	uint32_t ref_hz = (cfg->pll_reference_clock == YTM32_PLL_REF_FIRC)
-				  ? YTM32_FIRC_HZ
+				  ? YTM32_CMU_FIRC_HZ
 				  : cfg->fxosc_frequency;
 
-	return ((ref_hz / cfg->pll_reference_divider) *
-		cfg->pll_feedback_divider) / 2U;
+	if (!ytm32_cmu_pll_output_hz(ref_hz, cfg->pll_reference_divider,
+					     cfg->pll_feedback_divider, &pll_hz)) {
+		return 0U;
+	}
+
+	return pll_hz;
 }
 #endif /* FEATURE_SCU_SUPPORT_PLL */
 
@@ -117,7 +158,9 @@ static int ytm32_system_clock_source_hz(const struct ytm32_soc_clock_config *cfg
 #if defined(FEATURE_SCU_SUPPORT_PLL) && FEATURE_SCU_SUPPORT_PLL
 	case YTM32_SYSTEM_CLOCK_SRC_PLL:
 		if ((cfg->pll_reference_divider == 0U) ||
-		    (cfg->pll_feedback_divider == 0U)) {
+		    (cfg->pll_feedback_divider == 0U) ||
+		    ((cfg->pll_reference_clock != YTM32_PLL_REF_FIRC) &&
+		     (cfg->pll_reference_clock != YTM32_PLL_REF_FXOSC))) {
 			return -EINVAL;
 		}
 		if ((cfg->pll_reference_clock == YTM32_PLL_REF_FXOSC) &&
@@ -125,6 +168,9 @@ static int ytm32_system_clock_source_hz(const struct ytm32_soc_clock_config *cfg
 			return -EINVAL;
 		}
 		*source_hz = ytm32_pll_output_hz(cfg);
+		if (*source_hz == 0U) {
+			return -EINVAL;
+		}
 		*scu_source = SCU_SYSTEM_CLOCK_SRC_PLL;
 		return 0;
 #endif /* FEATURE_SCU_SUPPORT_PLL */
@@ -150,7 +196,19 @@ void soc_early_init_hook(void)
 	 * migration tracked as C-MPU-EFMINIT-01 in BRINGUP_RESOURCE_OWNERSHIP.md.
 	 * Not calling SystemInit() lets --gc-sections drop SystemInit/EfmInitMpu.
 	 */
-	EFM->CTRL |= EFM_CTRL_DPD_EN_MASK | EFM_CTRL_PREFETCH_EN_MASK;
+	{
+		uint32_t efm_enable_mask = 0U;
+
+#if defined(EFM_CTRL_DPD_EN_MASK)
+		efm_enable_mask |= EFM_CTRL_DPD_EN_MASK;
+#elif defined(EFM_CTRL_LPEN_MASK)
+		efm_enable_mask |= EFM_CTRL_LPEN_MASK;
+#endif
+#if defined(EFM_CTRL_PREFETCH_EN_MASK)
+		efm_enable_mask |= EFM_CTRL_PREFETCH_EN_MASK;
+#endif
+		EFM->CTRL |= efm_enable_mask;
+	}
 	CIM->CTRL |= CIM_CTRL_LOCKUPEN_MASK;
 #if (DISABLE_WDOG)
 	WDG0->SVCR = 0xB631U;
@@ -184,9 +242,10 @@ int ytm32_soc_apply_clock_config(const struct ytm32_soc_clock_config *cfg)
 			.divider = 1U,
 		},
 	};
+	cmu_config_t cmu_config;
 	clock_manager_user_config_t clock_config = {
 		.scuConfigPtr = &scu_config,
-		.cmuConfigPtr = &ytm32_cmu_config,
+		.cmuConfigPtr = &cmu_config,
 		.ipcConfig = {
 			.peripheralClocks = NULL,
 			.count = 0U,
@@ -205,6 +264,11 @@ int ytm32_soc_apply_clock_config(const struct ytm32_soc_clock_config *cfg)
 		return ret;
 	}
 
+	ret = ytm32_cmu_configure(cfg, &cmu_config);
+	if (ret < 0) {
+		return ret;
+	}
+
 	if (cfg->core_clock != (source_hz / cfg->core_divider)) {
 		return -EINVAL;
 	}
@@ -217,9 +281,12 @@ int ytm32_soc_apply_clock_config(const struct ytm32_soc_clock_config *cfg)
 	 * SIRC, so keep this condition tight.
 	 */
 	scu_config.fxoscConfig.enable =
-		(cfg->system_clock_source == YTM32_SYSTEM_CLOCK_SRC_FXOSC) ||
-		((cfg->system_clock_source == YTM32_SYSTEM_CLOCK_SRC_PLL) &&
-		 (cfg->pll_reference_clock == YTM32_PLL_REF_FXOSC));
+		(cfg->system_clock_source == YTM32_SYSTEM_CLOCK_SRC_FXOSC);
+#if defined(FEATURE_SCU_SUPPORT_PLL) && FEATURE_SCU_SUPPORT_PLL
+	scu_config.fxoscConfig.enable |=
+		(cfg->system_clock_source == YTM32_SYSTEM_CLOCK_SRC_PLL) &&
+		(cfg->pll_reference_clock == YTM32_PLL_REF_FXOSC);
+#endif /* FEATURE_SCU_SUPPORT_PLL */
 	scu_config.fxoscConfig.bypassMode = cfg->fxosc_bypass;
 	scu_config.fxoscConfig.gainSelection = cfg->fxosc_gain_selection;
 	scu_config.fxoscConfig.frequency = cfg->fxosc_frequency;
