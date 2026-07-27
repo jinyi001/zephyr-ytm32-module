@@ -5,6 +5,7 @@ if(CONFIG_SPI_YTM32)
   zephyr_library_include_directories(${ZEPHYR_BASE}/drivers/spi)
   zephyr_library_sources(
     ytm32_spi_hal.c
+    spi_ytm32_transaction.c
     spi_ytm32.c
   )
 endif()

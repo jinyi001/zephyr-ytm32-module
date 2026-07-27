@@ -1,0 +1,9 @@
+tests:
+  drivers.spi.ytm32.transaction:
+    tags:
+      - drivers
+      - spi
+      - ytm32
+    harness: ztest
+    platform_allow:
+      - native_sim/native/64

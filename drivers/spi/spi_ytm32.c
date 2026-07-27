@@ -13,6 +13,7 @@
 LOG_MODULE_REGISTER(spi_ytm32);
 
 #include "spi_context.h"
+#include "spi_ytm32_transaction.h"
 
 #include <zephyr/device.h>
 #include <zephyr/drivers/clock_control.h>
@@ -69,6 +70,7 @@ struct spi_ytm32_config {
 
 struct spi_ytm32_data {
 	struct spi_context ctx;      /* bus lock, config cache, CS control */
+	struct spi_ytm32_transaction transaction;
 	volatile int hal_result;     /* transfer outcome set by HAL callback */
 	struct k_sem done;           /* signals transfer completion from ISR */
 #ifdef CONFIG_SPI_YTM32_DMA
@@ -76,15 +78,12 @@ struct spi_ytm32_data {
 	uint8_t dma_tx_chan;
 	uint8_t dma_rx_chan;
 #endif
-	/* ISR-safe async path (spi_ytm32_transceive_async).
-	 * When async_active is true the completion callback routes to async_cb
-	 * instead of giving done.  Set before ytm32_spi_hal_transfer() and
-	 * cleared by the ISR before invoking async_cb, so there is no race as
-	 * long as only one transfer (blocking OR async) is in-flight at a time.
-	 */
-	volatile bool         async_active;
-	spi_ytm32_async_cb_t  async_cb;
-	void                 *async_cb_data;
+	/* ISR-safe async path. The transaction helper owns the cross-context state. */
+	const struct spi_config *async_config;
+	spi_ytm32_async_cb_t async_cb;
+	void *async_cb_data;
+	bool async_cs_active;
+	const struct spi_config *async_prepared_config;
 };
 
 /*
@@ -103,18 +102,37 @@ static uint8_t dummy_rx[YTM32_SPI_DUMMY_LEN] __aligned(2);
 static void spi_ytm32_hal_cb(void *user_data, int status)
 {
 	struct spi_ytm32_data *data = user_data;
+	enum spi_ytm32_transfer_kind kind =
+		spi_ytm32_transaction_kind(&data->transaction);
 
-	if (data->async_active) {
-		/* ISR-safe async path: route to caller's callback, not semaphore. */
-		data->async_active = false;
-		if (data->async_cb) {
-			data->async_cb(data->async_cb_data, status);
+	if (kind == SPI_YTM32_TRANSFER_ASYNC) {
+		const struct spi_config *config = data->async_config;
+		spi_ytm32_async_cb_t cb = data->async_cb;
+		void *cb_data = data->async_cb_data;
+
+		if (data->async_cs_active && config != NULL) {
+			k_busy_wait(config->cs.delay);
+			gpio_pin_set_dt(&config->cs.gpio, 0);
+		}
+
+		data->async_config = NULL;
+		data->async_cb = NULL;
+		data->async_cb_data = NULL;
+		data->async_cs_active = false;
+		/* The async configuration may differ from the cached thread config. */
+		data->ctx.config = NULL;
+		spi_ytm32_transaction_release(&data->transaction);
+
+		if (cb != NULL) {
+			cb(cb_data, status);
 		}
 		return;
 	}
 
-	data->hal_result = status;
-	k_sem_give(&data->done);
+	if (kind == SPI_YTM32_TRANSFER_BLOCKING) {
+		data->hal_result = status;
+		k_sem_give(&data->done);
+	}
 }
 
 /* ─────────────────────────── config validation ─────────────────────────── */
@@ -223,6 +241,22 @@ static int spi_ytm32_cs_configure(const struct spi_config *config)
 		return -ENODEV;
 	}
 	return gpio_pin_configure_dt(&config->cs.gpio, GPIO_OUTPUT_INACTIVE);
+}
+
+/* Async entry points cannot use spi_context_cs_control(), which may sleep. */
+static void spi_ytm32_async_cs_set(const struct spi_config *config, bool active)
+{
+	if (!spi_cs_is_gpio(config)) {
+		return;
+	}
+
+	if (active) {
+		gpio_pin_set_dt(&config->cs.gpio, 1);
+		k_busy_wait(config->cs.delay);
+	} else {
+		k_busy_wait(config->cs.delay);
+		gpio_pin_set_dt(&config->cs.gpio, 0);
+	}
 }
 
 /* ─────────────────────────── transfer ─────────────────────────── */
@@ -340,9 +374,18 @@ static int spi_ytm32_transceive(const struct device *dev,
 				const struct spi_buf_set *rx_bufs)
 {
 	struct spi_ytm32_data *data = dev->data;
-	int ret;
+	bool transaction_held = false;
+	bool cs_active = false;
+	int ret = -EIO;
 
 	spi_context_lock(&data->ctx, false, NULL, NULL, config);
+
+	ret = spi_ytm32_transaction_blocking_acquire(
+		&data->transaction, K_MSEC(CONFIG_SPI_YTM32_TRANSACTION_TIMEOUT_MS));
+	if (ret < 0) {
+		goto out;
+	}
+	transaction_held = true;
 
 	if (!spi_context_configured(&data->ctx, config)) {
 		ret = spi_ytm32_configure_bus(dev, config);
@@ -363,11 +406,19 @@ static int spi_ytm32_transceive(const struct device *dev,
 	}
 
 	spi_context_cs_control(&data->ctx, true);
+	cs_active = true;
 	ret = spi_ytm32_transfer(dev, tx_bufs, rx_bufs,
 					 SPI_WORD_SIZE_GET(config->operation));
-	spi_context_cs_control(&data->ctx, false);
+	_spi_context_cs_control(&data->ctx, false, true);
+	cs_active = false;
 
 out:
+	if (cs_active) {
+		_spi_context_cs_control(&data->ctx, false, true);
+	}
+	if (transaction_held) {
+		spi_ytm32_transaction_release(&data->transaction);
+	}
 	if (ret < 0) {
 		data->ctx.config = NULL;
 	}
@@ -376,11 +427,15 @@ out:
 }
 
 static int spi_ytm32_release(const struct device *dev,
-			     const struct spi_config *config)
+				     const struct spi_config *config)
 {
 	struct spi_ytm32_data *data = dev->data;
 
 	ARG_UNUSED(config);
+	if (spi_ytm32_transaction_kind(&data->transaction) !=
+	    SPI_YTM32_TRANSFER_IDLE) {
+		return -EBUSY;
+	}
 	spi_context_unlock_unconditionally(&data->ctx);
 	return 0;
 }
@@ -396,6 +451,7 @@ static int spi_ytm32_init(const struct device *dev)
 	uint8_t dma_rx = 0, dma_tx = 0;
 	int ret;
 
+	spi_ytm32_transaction_init(&data->transaction);
 	k_sem_init(&data->done, 0, 1);
 
 	if (!device_is_ready(cfg->clock_dev)) {
@@ -540,27 +596,160 @@ DT_INST_FOREACH_STATUS_OKAY(SPI_YTM32_INIT)
 
 /* ─────────────────────────── ISR-safe async path ─────────────────────────── */
 
+static void spi_ytm32_async_fail(struct spi_ytm32_data *data)
+{
+	if (spi_ytm32_transaction_kind(&data->transaction) !=
+	    SPI_YTM32_TRANSFER_ASYNC) {
+		return;
+	}
+
+	if (data->async_cs_active && data->async_config != NULL) {
+		spi_ytm32_async_cs_set(data->async_config, false);
+	}
+
+	data->async_config = NULL;
+	data->async_cb = NULL;
+	data->async_cb_data = NULL;
+	data->async_cs_active = false;
+	data->ctx.config = NULL;
+	spi_ytm32_transaction_release(&data->transaction);
+}
+
+int spi_ytm32_async_prepare_dt(const struct spi_dt_spec *spec)
+{
+	struct spi_ytm32_data *data;
+	int ret;
+
+	if (spec == NULL || spec->bus == NULL) {
+		return -EINVAL;
+	}
+	if (!spi_is_ready_dt(spec)) {
+		return -ENODEV;
+	}
+
+	ret = spi_ytm32_validate_config(&spec->config);
+	if (ret < 0) {
+		return ret;
+	}
+
+	data = spec->bus->data;
+	ret = spi_ytm32_transaction_blocking_acquire(
+		&data->transaction, K_MSEC(CONFIG_SPI_YTM32_TRANSACTION_TIMEOUT_MS));
+	if (ret < 0) {
+		return ret;
+	}
+
+	ret = spi_ytm32_cs_configure(&spec->config);
+	if (ret == 0) {
+		spi_ytm32_async_cs_set(&spec->config, false);
+		data->async_prepared_config = &spec->config;
+	}
+
+	spi_ytm32_transaction_release(&data->transaction);
+	return ret;
+}
+
+static int spi_ytm32_validate_async_buffers(const struct spi_config *config,
+						const uint8_t *tx,
+						uint8_t *rx, uint16_t len)
+{
+	uint8_t word_size = SPI_WORD_SIZE_GET(config->operation);
+
+	if (len == 0U || (tx == NULL && rx == NULL)) {
+		return -EINVAL;
+	}
+	if (word_size == 16U) {
+		if ((len & 0x1U) != 0U) {
+			return -EINVAL;
+		}
+		if ((tx != NULL && (((uintptr_t)tx & 0x1U) != 0U)) ||
+		    (rx != NULL && (((uintptr_t)rx & 0x1U) != 0U))) {
+			return -EINVAL;
+		}
+	}
+
+	return 0;
+}
+
+int spi_ytm32_transceive_async_dt(
+	const struct spi_dt_spec *spec, const uint8_t *tx, uint8_t *rx,
+	uint16_t len, spi_ytm32_async_cb_t cb, void *user_data)
+{
+	const struct spi_ytm32_config *bus_cfg;
+	struct spi_ytm32_data *data;
+	int ret;
+
+	if (spec == NULL || spec->bus == NULL) {
+		return -EINVAL;
+	}
+	ret = spi_ytm32_validate_config(&spec->config);
+	if (ret < 0) {
+		return ret;
+	}
+	ret = spi_ytm32_validate_async_buffers(&spec->config, tx, rx, len);
+	if (ret < 0) {
+		return ret;
+	}
+
+	data = spec->bus->data;
+	if (data->async_prepared_config != &spec->config) {
+		return -EINVAL;
+	}
+
+	ret = spi_ytm32_transaction_async_try_acquire(&data->transaction);
+	if (ret < 0) {
+		return ret;
+	}
+
+	ret = spi_ytm32_configure_bus(spec->bus, &spec->config);
+	if (ret < 0) {
+		spi_ytm32_async_fail(data);
+		return ret;
+	}
+
+	/* Async configuration is not represented by spi_context's cache. */
+	data->ctx.config = NULL;
+	data->async_config = &spec->config;
+	data->async_cb = cb;
+	data->async_cb_data = user_data;
+	data->async_cs_active = spi_cs_is_gpio(&spec->config);
+	spi_ytm32_async_cs_set(&spec->config, data->async_cs_active);
+
+	bus_cfg = spec->bus->config;
+	ret = ytm32_spi_hal_transfer(bus_cfg->instance, tx, rx, len);
+	if (ret < 0) {
+		spi_ytm32_async_fail(data);
+	}
+
+	return ret;
+}
+
 int spi_ytm32_transceive_async(const struct device *dev,
-			       const uint8_t *tx, uint8_t *rx, uint16_t len,
+				       const uint8_t *tx, uint8_t *rx, uint16_t len,
 			       spi_ytm32_async_cb_t cb, void *user_data)
 {
 	const struct spi_ytm32_config *cfg = dev->config;
 	struct spi_ytm32_data *data = dev->data;
 	int ret;
 
+	ret = spi_ytm32_transaction_async_try_acquire(&data->transaction);
+	if (ret < 0) {
+		return ret;
+	}
+
 	/*
-	 * Write callback fields before setting async_active so that if the
-	 * transfer completes before this function returns (theoretically
-	 * possible for very short transfers) the ISR already has valid pointers.
+	 * Compatibility path: the caller still owns configuration and CS. The
+	 * transaction gate nevertheless prevents a blocking transfer or another
+	 * async transfer from touching the hardware concurrently.
 	 */
-	data->async_cb      = cb;
+	data->async_config = NULL;
+	data->async_cb = cb;
 	data->async_cb_data = user_data;
-	data->async_active  = true;
+	data->async_cs_active = false;
 
 	ret = ytm32_spi_hal_transfer(cfg->instance, tx, rx, len);
 	if (ret < 0) {
-		/* HAL rejected — clear flag so the blocking path stays usable. */
-		data->async_active = false;
+		spi_ytm32_async_fail(data);
 	}
 
 	return ret;

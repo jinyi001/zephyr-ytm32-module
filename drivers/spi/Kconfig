@@ -14,6 +14,15 @@ config SPI_YTM32_TRANSFER_TIMEOUT_MS
 	  Timeout used while waiting for a SPI transfer to complete (both
 	  interrupt-driven and DMA modes).
 
+config SPI_YTM32_TRANSACTION_TIMEOUT_MS
+	int "YTM32 SPI transaction gate timeout in milliseconds"
+	default 1000
+	depends on SPI_YTM32
+	help
+	  Maximum time a blocking SPI transaction waits for an in-flight async
+	  transfer or another blocking transaction to release the hardware gate.
+	  A timeout must leave the gate and spi_context usable for the next request.
+
 config SPI_YTM32_DMA
 	bool "YTM32 SPI DMA support"
 	default y
