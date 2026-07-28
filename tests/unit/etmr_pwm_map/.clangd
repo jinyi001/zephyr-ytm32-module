@@ -1,0 +1,3 @@
+# Compile database for the eTMR PWM-map native unit test.
+CompileFlags:
+  CompilationDatabase: ../../../../../../build/clangd-native-etmr-pwm-map

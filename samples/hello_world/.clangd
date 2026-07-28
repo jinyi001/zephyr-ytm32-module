@@ -1,0 +1,3 @@
+# Compile database for the module hello-world sample.
+CompileFlags:
+  CompilationDatabase: ../../../../../build/ytm32-md1-minimal

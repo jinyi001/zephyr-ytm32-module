@@ -1,0 +1,4 @@
+# Default compile database for platform sources in this module.
+# Native unit tests override it in their own directories.
+CompileFlags:
+  CompilationDatabase: ../../../build/s5-pwm-adc-trigger-final3

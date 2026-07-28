@@ -1,0 +1,3 @@
+# Compile database for the shared SPI transaction native unit test.
+CompileFlags:
+  CompilationDatabase: ../../../../../../build/clangd-native-spi-transaction

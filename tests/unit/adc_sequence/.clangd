@@ -1,0 +1,3 @@
+# Compile database for the ADC sequence native unit test.
+CompileFlags:
+  CompilationDatabase: ../../../../../../build/clangd-native-adc-sequence
