@@ -36,6 +36,7 @@
 #include <zephyr/dt-bindings/clock/ytmicro,ytm32b1md1-clock.h>
 
 #include "adc_ytm32_priv.h"
+#include "adc_ytm32_logic.h"
 
 LOG_MODULE_DECLARE(adc_ytm32, CONFIG_ADC_LOG_LEVEL);
 
@@ -209,7 +210,6 @@ int adc_ytm32_dma_start(const struct device *dev,
 	struct adc_ytm32_shared *st = adc_ytm32_shared(dev);
 	const struct adc_ytm32_config *config = dev->config;
 	adc_converter_config_t conv;
-	uint8_t max_smp;
 	int ret;
 
 	const bool hw_trig = (cfg->trigger == ADC_YTM32_DMA_TRIGGER_HARDWARE);
@@ -237,11 +237,22 @@ int adc_ytm32_dma_start(const struct device *dev,
 		return -EINVAL;
 	}
 
-	uint8_t ch_count = (uint8_t)POPCOUNT(cfg->channels);
+	uint8_t ch_count;
+	uint8_t max_smp;
+	adc_inputchannel_t sequence_channels[ADC_CHSEL_COUNT];
 
-	if (ch_count > ADC_CHSEL_COUNT) {
-		LOG_ERR("too many channels (%u > %u)", ch_count, ADC_CHSEL_COUNT);
-		return -EINVAL;
+	ret = adc_ytm32_sequence_from_config(config, cfg->channels,
+						     sequence_channels, st->sample_time,
+						     &ch_count, &max_smp);
+	if (ret < 0) {
+		LOG_ERR("invalid ADC sequence order: %d", ret);
+		return ret;
+	}
+	ret = adc_ytm32_validate_timing(st->adc_clock_hz, max_smp,
+					config->adc_start_time);
+	if (ret < 0) {
+		LOG_ERR("ADC DMA timing violates DS v1.9 limits: %d", ret);
+		return ret;
 	}
 
 	/* Save config for re-arm in callback */
@@ -306,8 +317,9 @@ int adc_ytm32_dma_start(const struct device *dev,
 	 *   sequence back-to-back.
 	 */
 	ADC_DRV_InitConverterStruct(&conv);
-	adc_ytm32_channels_to_sequence(cfg->channels, conv.sequenceConfig.channels,
-				       st->sample_time, &max_smp);
+	for (uint8_t index = 0U; index < ch_count; index++) {
+		conv.sequenceConfig.channels[index] = sequence_channels[index];
+	}
 
 	conv.sequenceConfig.totalChannels     = ch_count;
 	conv.sequenceConfig.sequenceMode      = hw_trig ? ADC_CONV_LOOP
@@ -320,7 +332,8 @@ int adc_ytm32_dma_start(const struct device *dev,
 	 * Separate from the IPC clock tree divider (ytmicro,functional-clock-divider).
 	 * Vendor HAL semantics are n+1, not 2^n:
 	 *   FADC = func_clk / (CFG1.PRS + 1).
-	 * Runtime assertion in ADC_DRV_ConfigConverter() requires FADC in [2, 32] MHz.
+	 * DS v1.9 requires FADC in [4, 32] MHz; sequence timing was validated
+	 * before the DMA channel was touched.
 	 */
 	conv.clockDivider = (adc_clk_divide_t)config->adc_clk_div;
 	conv.resolution   = adc_ytm32_bits_to_resolution(cfg->resolution);

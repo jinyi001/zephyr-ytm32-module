@@ -1,0 +1,9 @@
+tests:
+  drivers.adc.ytm32.sequence:
+    tags:
+      - drivers
+      - adc
+      - ytm32
+    harness: ztest
+    platform_allow:
+      - native_sim/native/64

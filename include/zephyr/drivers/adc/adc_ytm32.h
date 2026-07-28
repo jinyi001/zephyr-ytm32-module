@@ -142,6 +142,15 @@ struct adc_ytm32_dma_config {
 	void *user_data;
 };
 
+/** Runtime timing values captured after the ADC clock has been initialized. */
+struct adc_ytm32_timing {
+	uint32_t fadc_hz;
+	uint8_t sample_time;
+	uint32_t sample_ns;
+	uint32_t conversion_ns;
+	uint32_t startup_ns;
+};
+
 /**
  * @brief Start DMA continuous sampling.
  *
@@ -199,6 +208,14 @@ int adc_ytm32_dma_stop(const struct device *dev);
  * @return 0 on success, negative errno on failure
  */
 int adc_ytm32_dma_resume(const struct device *dev);
+
+/** Read the configured FADC timing for diagnostics and calibration reports. */
+int adc_ytm32_get_timing(const struct device *dev, uint8_t sample_time,
+				 struct adc_ytm32_timing *out);
+
+/** Read the ADC0 CIM trigger selector programmed by the driver. */
+int adc_ytm32_get_cim_trigger_select(const struct device *dev,
+					     uint32_t *select);
 
 #ifdef __cplusplus
 }

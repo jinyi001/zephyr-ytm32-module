@@ -34,6 +34,7 @@
 #include "adc_context.h"
 
 #include "adc_ytm32_priv.h"
+#include "adc_ytm32_logic.h"
 
 /*
  * Errata E600001 (vendor numbering: ADC_ERRATA_E0002).
@@ -81,6 +82,57 @@ struct adc_ytm32_shared *adc_ytm32_shared(const struct device *dev)
 	return &data->shared;
 }
 
+int adc_ytm32_get_timing(const struct device *dev, uint8_t sample_time,
+				 struct adc_ytm32_timing *out)
+{
+	struct adc_ytm32_data *data;
+	const struct adc_ytm32_config *config;
+	int ret;
+
+	if (dev == NULL || out == NULL) {
+		return -EINVAL;
+	}
+	data = dev->data;
+	config = dev->config;
+	if (data->shared.adc_clock_hz == 0U) {
+		return -EAGAIN;
+	}
+
+	ret = adc_ytm32_validate_timing(data->shared.adc_clock_hz,
+					 sample_time, config->adc_start_time);
+	if (ret < 0) {
+		return ret;
+	}
+
+	out->fadc_hz = data->shared.adc_clock_hz;
+	out->sample_time = sample_time;
+	out->sample_ns = adc_ytm32_ticks_to_ns(sample_time + 2U,
+						 data->shared.adc_clock_hz);
+	out->conversion_ns = adc_ytm32_ticks_to_ns(sample_time + 14U,
+						     data->shared.adc_clock_hz);
+	out->startup_ns = adc_ytm32_ticks_to_ns(config->adc_start_time + 1U,
+						   data->shared.adc_clock_hz);
+	return 0;
+}
+
+int adc_ytm32_get_cim_trigger_select(const struct device *dev,
+					     uint32_t *select)
+{
+	const struct adc_ytm32_config *config;
+
+	if (dev == NULL || select == NULL) {
+		return -EINVAL;
+	}
+	config = dev->config;
+	if (config->instance != 0U) {
+		return -ENOTSUP;
+	}
+
+	*select = (CIM->CTRL & CIM_CTRL_ADC0_TRIG_SEL_MASK) >>
+		CIM_CTRL_ADC0_TRIG_SEL_SHIFT;
+	return 0;
+}
+
 /* ──────────────────────── helpers (shared with Phase 2) ─────────────────── */
 
 adc_resolution_t adc_ytm32_bits_to_resolution(uint8_t bits)
@@ -98,30 +150,68 @@ uint8_t adc_ytm32_channels_to_sequence(uint32_t channels_mask,
 				       uint8_t *sample_times,
 				       uint8_t *max_smp_out)
 {
-	uint8_t slot = 0;
-	/* Use the maximum among the selected channels exactly as configured.
-	 * channel_setup(ADC_ACQ_TIME_DEFAULT) stores ADC_DEFAULT_SAMPLE_TIME in
-	 * sample_times[ch], so initializing this to the default here would silently
-	 * clamp any explicit smaller SMP (for example stage8's SMP=4) back to 12.
-	 */
+	uint8_t sequence[ADC_CHSEL_COUNT] = {0};
+	uint8_t channel_count = 0U;
 	uint8_t max_smp = 0U;
+	int ret;
 
-	for (uint8_t ch = 0;
-	     channels_mask != 0U && slot < ADC_CHSEL_COUNT;
-	     ch++, channels_mask >>= 1U) {
-		if ((channels_mask & 1U) == 0U) {
-			continue;
+	ret = adc_ytm32_sequence_expand(channels_mask, NULL, 0U,
+					ADC_CHSEL_COUNT, sequence, sample_times,
+					YTM32_ADC_MAX_CHANS, &channel_count,
+					&max_smp);
+	if (ret < 0) {
+		if (max_smp_out != NULL) {
+			*max_smp_out = 0U;
 		}
-		chsel[slot++] = (adc_inputchannel_t)ch;
-		if (sample_times[ch] > max_smp) {
-			max_smp = sample_times[ch];
-		}
+		return 0U;
 	}
 
+	for (uint8_t index = 0U; index < channel_count; index++) {
+		chsel[index] = (adc_inputchannel_t)sequence[index];
+	}
 	if (max_smp_out != NULL) {
 		*max_smp_out = max_smp;
 	}
-	return slot;
+	return channel_count;
+}
+
+int adc_ytm32_sequence_from_config(const struct adc_ytm32_config *config,
+					   uint32_t channels_mask,
+					   adc_inputchannel_t *chsel,
+					   const uint8_t *sample_times,
+					   uint8_t *channel_count_out,
+					   uint8_t *max_smp_out)
+{
+	uint8_t sequence[ADC_CHSEL_COUNT] = {0};
+	uint8_t channel_count;
+	uint8_t max_smp;
+	int ret;
+
+	if (config == NULL || chsel == NULL || sample_times == NULL ||
+	    channel_count_out == NULL || max_smp_out == NULL) {
+		return -EINVAL;
+	}
+
+	ret = adc_ytm32_sequence_expand(
+		channels_mask,
+		config->sequence_order,
+		config->sequence_order_count,
+		ADC_CHSEL_COUNT,
+		sequence,
+		sample_times,
+		YTM32_ADC_MAX_CHANS,
+		&channel_count,
+		&max_smp);
+	if (ret < 0) {
+		return ret;
+	}
+
+	for (uint8_t index = 0U; index < channel_count; index++) {
+		chsel[index] = (adc_inputchannel_t)sequence[index];
+	}
+	*channel_count_out = channel_count;
+	*max_smp_out = max_smp;
+	return 0;
 }
 
 /* ──────────────────────── Phase 1: Zephyr ADC API ──────────────────────── */
@@ -152,7 +242,7 @@ static int adc_ytm32_channel_setup(const struct device *dev,
 
 	if (acq == ADC_ACQ_TIME_DEFAULT) {
 		data->shared.sample_time[channel_cfg->channel_id] =
-			ADC_DEFAULT_SAMPLE_TIME;
+			YTM32_ADC_DEFAULT_SAMPLE_TIME;
 	} else if (ADC_ACQ_TIME_UNIT(acq) == ADC_ACQ_TIME_TICKS) {
 		data->shared.sample_time[channel_cfg->channel_id] =
 			(uint8_t)MIN(ADC_ACQ_TIME_VALUE(acq), 0xFFU);
@@ -168,6 +258,11 @@ static int adc_ytm32_start_read(const struct device *dev,
 				const struct adc_sequence *sequence)
 {
 	struct adc_ytm32_data *data = dev->data;
+	const struct adc_ytm32_config *config = dev->config;
+	adc_inputchannel_t sequence_channels[ADC_CHSEL_COUNT];
+	uint8_t ch_count;
+	uint8_t max_smp;
+	int ret;
 
 	if (data->shared.dma_active) {
 		LOG_ERR("DMA mode active; stop it before calling adc_read");
@@ -185,7 +280,20 @@ static int adc_ytm32_start_read(const struct device *dev,
 		return -ENOTSUP;
 	}
 
-	uint8_t ch_count = (uint8_t)POPCOUNT(sequence->channels);
+	ret = adc_ytm32_sequence_from_config(config, sequence->channels,
+						     sequence_channels,
+						     data->shared.sample_time,
+						     &ch_count, &max_smp);
+	if (ret < 0) {
+		LOG_ERR("invalid ADC sequence order: %d", ret);
+		return ret;
+	}
+	ret = adc_ytm32_validate_timing(data->shared.adc_clock_hz, max_smp,
+						config->adc_start_time);
+	if (ret < 0) {
+		LOG_ERR("ADC sequence timing is outside DS v1.9 limits: %d", ret);
+		return ret;
+	}
 	size_t needed = (size_t)ch_count * sizeof(uint16_t);
 
 	if (sequence->options) {
@@ -245,11 +353,17 @@ static void adc_context_start_sampling(struct adc_context *ctx)
 
 	ADC_DRV_InitConverterStruct(&conv);
 
+	uint8_t slot;
 	uint8_t max_smp;
-	uint8_t slot = adc_ytm32_channels_to_sequence(ctx->sequence.channels,
-						      conv.sequenceConfig.channels,
-						      data->shared.sample_time,
-						      &max_smp);
+	int ret = adc_ytm32_sequence_from_config(config, ctx->sequence.channels,
+							conv.sequenceConfig.channels,
+							data->shared.sample_time,
+							&slot, &max_smp);
+	if (ret < 0) {
+		LOG_ERR("invalid ADC sequence order during sampling: %d", ret);
+		adc_context_complete(ctx, ret);
+		return;
+	}
 
 	data->shared.channel_count = slot;
 	/* sampling_index is only reset by adc_context_start_read when
@@ -278,7 +392,8 @@ static void adc_context_start_sampling(struct adc_context *ctx)
 	 * Separate from the IPC clock tree divider (ytmicro,functional-clock-divider).
 	 * Vendor HAL semantics are n+1, not 2^n:
 	 *   FADC = func_clk / (CFG1.PRS + 1).
-	 * Runtime assertion in ADC_DRV_ConfigConverter() requires FADC in [2, 32] MHz.
+	 * DS v1.9 requires FADC in [4, 32] MHz; init and sequence setup validate
+	 * this before reaching the HAL.
 	 */
 	conv.clockDivider = (adc_clk_divide_t)config->adc_clk_div;
 	conv.resolution   = adc_ytm32_bits_to_resolution(ctx->sequence.resolution);
@@ -376,6 +491,24 @@ static int adc_ytm32_init(const struct device *dev)
 		return ret;
 	}
 
+	uint32_t functional_clock_hz;
+	ret = clock_control_get_rate(config->clock_dev, config->clock_subsys,
+					     &functional_clock_hz);
+	if (ret < 0 || functional_clock_hz == 0U) {
+		LOG_ERR("failed to read ADC functional clock: %d", ret);
+		return ret < 0 ? ret : -EINVAL;
+	}
+	data->shared.adc_clock_hz = functional_clock_hz /
+		(config->adc_clk_div + 1U);
+	ret = adc_ytm32_validate_timing(data->shared.adc_clock_hz,
+					YTM32_ADC_DEFAULT_SAMPLE_TIME,
+					config->adc_start_time);
+	if (ret < 0) {
+		LOG_ERR("ADC timing violates YTM32B1MD1 DS v1.9: FADC=%u Hz ret=%d",
+			data->shared.adc_clock_hz, ret);
+		return ret;
+	}
+
 	if (config->dma_dev != NULL && !device_is_ready(config->dma_dev)) {
 		LOG_ERR("DMA device not ready");
 		return -ENODEV;
@@ -426,6 +559,11 @@ static DEVICE_API(adc, adc_ytm32_driver_api) = {
 		(DT_INST_PROP(inst, ytmicro_hw_trigger_source)), \
 		(YTM32_ADC_NO_HW_TRIG))
 
+#define YTM32_ADC_SEQUENCE_ORDER_ITEM(inst, idx) \
+	COND_CODE_1(DT_INST_PROP_HAS_IDX(inst, ytmicro_sequence_order, idx), \
+		(DT_INST_PROP_BY_IDX(inst, ytmicro_sequence_order, idx)), \
+		(0U))
+
 #define YTM32_ADC_TMU_DEV(inst) \
 	COND_CODE_1(DT_INST_NODE_HAS_PROP(inst, ytmicro_tmu), \
 		(DEVICE_DT_GET(DT_INST_PHANDLE(inst, ytmicro_tmu))), \
@@ -454,6 +592,18 @@ static DEVICE_API(adc, adc_ytm32_driver_api) = {
 				ytmicro_adc_clock_divider),			\
 		.adc_start_time = DT_INST_PROP(inst,				\
 				ytmicro_adc_start_time),			\
+		.sequence_order = {							\
+			YTM32_ADC_SEQUENCE_ORDER_ITEM(inst, 0),				\
+			YTM32_ADC_SEQUENCE_ORDER_ITEM(inst, 1),				\
+			YTM32_ADC_SEQUENCE_ORDER_ITEM(inst, 2),				\
+			YTM32_ADC_SEQUENCE_ORDER_ITEM(inst, 3),				\
+			YTM32_ADC_SEQUENCE_ORDER_ITEM(inst, 4),				\
+			YTM32_ADC_SEQUENCE_ORDER_ITEM(inst, 5),				\
+			YTM32_ADC_SEQUENCE_ORDER_ITEM(inst, 6),				\
+			YTM32_ADC_SEQUENCE_ORDER_ITEM(inst, 7),				\
+		},							\
+		.sequence_order_count = DT_INST_PROP_LEN_OR(inst,			\
+				ytmicro_sequence_order, 0),					\
 		.pincfg       = PINCTRL_DT_INST_DEV_CONFIG_GET(inst),		\
 		.irq_config_func = adc_ytm32_irq_config_##inst,			\
 		.dma_dev      = YTM32_ADC_DMA_DEV(inst),			\

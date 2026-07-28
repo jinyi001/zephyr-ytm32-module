@@ -38,6 +38,9 @@
 /* Maximum external channel count across all YTM32 variants */
 #define YTM32_ADC_MAX_CHANS 38U
 
+/* SMP=2 gives t_sample=125 ns at 32 MHz and 1 us at 4 MHz. */
+#define YTM32_ADC_DEFAULT_SAMPLE_TIME 2U
+
 /* Sentinel meaning "no hardware trigger configured" */
 #define YTM32_ADC_NO_HW_TRIG UINT32_MAX
 
@@ -50,6 +53,8 @@ struct adc_ytm32_config {
 	clock_control_subsys_t           clock_subsys;
 	uint32_t                         adc_clk_div; /* CFG1.PRS — ADC internal divider */
 	uint32_t                         adc_start_time; /* CFG1.STCNT — ADC startup ticks */
+	uint8_t                          sequence_order[ADC_CHSEL_COUNT];
+	uint8_t                          sequence_order_count;
 	const struct pinctrl_dev_config *pincfg;
 	void (*irq_config_func)(void);
 	IRQn_Type                         irq;
@@ -73,6 +78,7 @@ struct adc_ytm32_config {
 struct adc_ytm32_shared {
 	uint8_t channel_count;
 	uint8_t sample_time[YTM32_ADC_MAX_CHANS];
+	uint32_t adc_clock_hz;
 	/* Phase 2 */
 	bool    dma_active;
 	int     dma_error;
@@ -92,6 +98,13 @@ uint8_t adc_ytm32_channels_to_sequence(uint32_t channels_mask,
 					adc_inputchannel_t *chsel,
 					uint8_t *sample_times,
 					uint8_t *max_smp_out);
+
+int adc_ytm32_sequence_from_config(const struct adc_ytm32_config *config,
+					   uint32_t channels_mask,
+					   adc_inputchannel_t *chsel,
+					   const uint8_t *sample_times,
+					   uint8_t *channel_count_out,
+					   uint8_t *max_smp_out);
 
 /* ─────────────── Phase 2 half called from the Phase 1 ISR ───────────────── */
 

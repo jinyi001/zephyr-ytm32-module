@@ -71,21 +71,21 @@ properties:
         7 = divide by 8
       Valid range: 0–15 (4-bit field, CFG1.PRS mask 0xF00).
 
-      Driver runtime assertion (adc_driver.c:106):
-        ADC_CLOCK_FREQ_MIN_RUNTIME = 2 MHz  (YTM32B1MD1_features.h)
-        ADC_CLOCK_FREQ_MAX_RUNTIME = 32 MHz
-      So FADC = func_clk / (divider + 1) must be in [2, 32] MHz.
+      The driver validates FADC = func_clk / (divider + 1) against the
+      YTM32B1MD1 DS v1.9 range [4, 32] MHz before enabling conversions.
 
-      Factory frontend validation (sdk.json adc_func_clk = [4, 32] MHz):
-        The frontend checks func_clk (after IPC divider) is in [4, 32] MHz.
-        With the SDK default divider=2 (÷3), func_clk=16 MHz → FADC=5.33 MHz.
+      Datasheet DS v1.9 §6.4.5 specifies FADC 4--32 MHz and TSAMPLE
+      100--1000 ns. The driver also validates the selected sample time and
+      requires ADC startup time >= 2 us.
 
-      Datasheet (DS v1.8 §6.4.5):
-        FADC (conversion clock) spec: min 0.1 MHz, max 2 MHz.
-        TSAMPLE (sampling time): min 100 ns, max 1000 ns.
-      The driver's runtime limits (2–32 MHz) are broader than the DS spec (≤2 MHz).
-      The SDK default configuration (FIRC 96÷6=16 MHz, divider=2, FADC=5.33 MHz)
-      operates above the DS spec — this is the factory-intended configuration.
+  ytmicro,sequence-order:
+    type: array
+    required: false
+    description: |
+      Optional explicit ADC sequence order. Each entry is a Zephyr ADC
+      channel number. When present, it must contain every bit selected by the
+      adc_sequence.channels mask exactly once; a mismatch is an error. When
+      absent, selected channels are emitted in ascending channel order.
 
   dmas:
     type: phandle-array
