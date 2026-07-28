@@ -59,6 +59,17 @@ properties:
       complementary pair with center-aligned PWM and dead-time insertion.
       Example: 0x15 (0b00010101) enables pairs CH0/CH1, CH2/CH3, CH4/CH5.
 
+  ytmicro,phase-channels:
+    type: array
+    required: false
+    description: |
+      Even eTMR channel IDs for phase A, phase B, and phase C in the
+      three-phase ISR fast path.  Every channel must be an enabled bit in
+      ytmicro,complementary-channels-mask; its following odd channel is the
+      complementary output.  The driver rejects odd, duplicate, or
+      out-of-range entries and keeps the outputs masked when the property is
+      absent or invalid.
+
   ytmicro,deadtime-ns:
     type: int
     required: false
@@ -109,6 +120,65 @@ properties:
       The ADC node must set ytmicro,hw-trigger-source to
       YTM32_TMU_SRC_ETMRn_EXT_TRIG accordingly.
       Mutually exclusive with ytmicro,adc-sync-trigger.
+
+  ytmicro,fault-channels-mask:
+    type: int
+    required: false
+    default: 0
+    description: |
+      Bitmask of eTMR fault inputs FLT0..FLT3 to configure.  A set bit
+      configures the corresponding hardware fault input and its IRQ path.
+
+  ytmicro,fault-active-low-mask:
+    type: int
+    required: false
+    default: 0
+    description: |
+      Per-input polarity for configured fault inputs.  A set bit means a
+      low input level is the active fault level; an unset bit means high.
+
+  ytmicro,fault-filter-count:
+    type: int
+    required: false
+    default: 0
+    description: FAULT[FFCNT] filter sample counter value (0..15).
+
+  ytmicro,fault-filter-period:
+    type: int
+    required: false
+    default: 0
+    description: FAULT[FFPER] filter sample period value (0..15).
+
+  ytmicro,fault-input-stretch:
+    type: boolean
+    description: Enable FAULT[STRETCH] input pulse stretching.
+
+  ytmicro,fault-combinational:
+    type: boolean
+    description: Enable the clockless FAULT[FCOMB] hardware shutdown path.
+
+  ytmicro,fault-recovery:
+    type: int
+    required: false
+    default: 0
+    description: |
+      Hardware recovery opportunity: 0 disabled, 1 MID, 2 MOD,
+      3 immediate.  Motor-control boards must use 0.
+
+  ytmicro,fault-auto-mode:
+    type: int
+    required: false
+    default: 0
+    description: |
+      Fault automatic recovery mode.  0 requires manual flag clear before
+      recovery; motor-control boards must use 0.
+
+  ytmicro,channel-safe-state:
+    type: array
+    required: false
+    description: |
+      Per-channel fault safe state for CH0..CH7: 0 low, 1 high, 2
+      tristate.  An absent property defaults every channel to low.
 
   ytmicro,autostart:
     type: boolean

@@ -1,0 +1,9 @@
+tests:
+  drivers.pwm.ytm32.etmr_map:
+    tags:
+      - drivers
+      - pwm
+      - ytm32
+    harness: ztest
+    platform_allow:
+      - native_sim/native/64
