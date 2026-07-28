@@ -22,14 +22,16 @@ ZTEST(etmr_pwm_map, test_v3_phase_map_and_output_mask)
 	const uint8_t phase_channels[PWM_YTM32_ETMR_PHASE_COUNT] = {6U, 2U, 4U};
 	struct pwm_ytm32_etmr_phase_map map;
 
-	zassert_ok(pwm_ytm32_etmr_phase_map_validate(phase_channels, 0x54U,
-							     &map),
+	zassert_equal(pwm_ytm32_etmr_phase_complementary_mask(phase_channels),
+			       0x54U, "phase map derives complementary mask");
+	zassert_ok(pwm_ytm32_etmr_phase_map_validate(phase_channels, &map),
 			   "V3 phase map should be valid");
 	zassert_equal(map.phase_channel[0], 6U, "phase A channel");
 	zassert_equal(map.phase_channel[1], 2U, "phase B channel");
 	zassert_equal(map.phase_channel[2], 4U, "phase C channel");
 	zassert_equal(map.channel_mask, 0xFCU, "physical output mask");
-	zassert_equal(pwm_ytm32_etmr_complementary_channel_mask(0x54U), 0xFCU,
+	zassert_equal(pwm_ytm32_etmr_complementary_channel_mask(
+				pwm_ytm32_etmr_phase_complementary_mask(phase_channels)), 0xFCU,
 		       "complementary mask expansion");
 }
 
@@ -39,23 +41,17 @@ ZTEST(etmr_pwm_map, test_rejects_invalid_phase_maps)
 								 4U};
 	static const uint8_t out_of_range[PWM_YTM32_ETMR_PHASE_COUNT] = {8U, 2U,
 									4U};
-	static const uint8_t not_enabled[PWM_YTM32_ETMR_PHASE_COUNT] = {0U, 2U,
-									4U};
 	static const uint8_t duplicate[PWM_YTM32_ETMR_PHASE_COUNT] = {6U, 6U,
 									4U};
 	struct pwm_ytm32_etmr_phase_map map;
 
-	zassert_equal(pwm_ytm32_etmr_phase_map_validate(odd_channel, 0x54U,
-								&map), -EINVAL,
+	zassert_equal(pwm_ytm32_etmr_phase_complementary_mask(odd_channel), 0U,
+			       "odd channel must not derive a pair");
+	zassert_equal(pwm_ytm32_etmr_phase_map_validate(odd_channel, &map), -EINVAL,
 				      "odd channel must be rejected");
-	zassert_equal(pwm_ytm32_etmr_phase_map_validate(out_of_range, 0x54U,
-								&map), -EINVAL,
+	zassert_equal(pwm_ytm32_etmr_phase_map_validate(out_of_range, &map), -EINVAL,
 				      "out-of-range channel must be rejected");
-	zassert_equal(pwm_ytm32_etmr_phase_map_validate(not_enabled, 0x54U,
-								&map), -EINVAL,
-				      "channel outside complementary mask must be rejected");
-	zassert_equal(pwm_ytm32_etmr_phase_map_validate(duplicate, 0x54U,
-								&map), -EINVAL,
+	zassert_equal(pwm_ytm32_etmr_phase_map_validate(duplicate, &map), -EINVAL,
 				      "duplicate channel must be rejected");
 }
 
@@ -90,4 +86,19 @@ ZTEST(etmr_pwm_map, test_fault_polarity_maps_raw_inputs)
 		       0x08U, "active-high high level");
 	zassert_equal(pwm_ytm32_etmr_fault_active_mask(0x00U, 0x08U, 0x00U),
 		       0x00U, "active-high low idle level");
+}
+
+ZTEST(etmr_pwm_map, test_fault_status_from_hal_is_already_polarity_decoded)
+{
+	/* IOSTS.F3 is zero when an active-low, high-idle FLT3 is healthy. */
+	zassert_equal(pwm_ytm32_etmr_fault_status_active_mask(0x00U, 0x08U),
+		       0x00U, "polarity-decoded idle status");
+
+	/* IOSTS.F3 becomes one only when eTMR has detected an active fault. */
+	zassert_equal(pwm_ytm32_etmr_fault_status_active_mask(0x08U, 0x08U),
+		       0x08U, "polarity-decoded active status");
+
+	/* Unconfigured status bits must not escape the configured mask. */
+	zassert_equal(pwm_ytm32_etmr_fault_status_active_mask(0x0FU, 0x08U),
+		       0x08U, "configured status mask");
 }

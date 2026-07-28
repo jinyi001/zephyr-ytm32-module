@@ -35,8 +35,6 @@ struct pwm_ytm32_config {
 	clock_control_subsys_t clk_sys;
 	uint8_t prescaler;
 	const struct pinctrl_dev_config *pincfg;
-	/* Bitmask: bit N (N even) set → channel N/N+1 form a complementary pair */
-	uint8_t comp_mask;
 	/* Dead time in ns applied to all complementary pairs */
 	uint32_t deadtime_ns;
 	/* Initial PWM frequency used during eTMR_DRV_InitPwm */
@@ -51,7 +49,7 @@ struct pwm_ytm32_config {
 	bool autostart;
 	/* Use OTRIG.MIDTEN + MID register for mid-period ADC trigger (DT ytmicro,adc-mid-trigger) */
 	bool adc_mid_trigger;
-	/* Explicit even-channel mapping for the three-phase ISR fast path. */
+	/* Three even phase channels; each owns its following complementary output. */
 	uint8_t phase_channels[PWM_YTM32_ETMR_PHASE_COUNT];
 	bool phase_channels_present;
 	/* Hardware fault inputs and their recovery/safe-state policy. */
@@ -63,7 +61,6 @@ struct pwm_ytm32_config {
 	bool fault_combinational;
 	uint8_t fault_recovery;
 	uint8_t fault_auto_mode;
-	uint8_t channel_safe_state[ETMR_CH_COUNT];
 };
 
 struct pwm_ytm32_data {
@@ -108,13 +105,19 @@ static inline uint32_t counter_freq(const struct pwm_ytm32_config *cfg,
 	return data->clk_rate;
 }
 
+static inline uint8_t phase_complementary_mask(
+	const struct pwm_ytm32_config *cfg)
+{
+	return pwm_ytm32_etmr_phase_complementary_mask(cfg->phase_channels);
+}
+
 /**
  * channel_is_comp() - 判断通道是否属于互补对
  *
  * @cfg: 驱动配置结构体指针
  * @ch:  待查询的通道号（0–7）
  *
- * 将通道号取偶（ch & ~1U），查询 comp_mask 中对应的 bit。
+ * 将通道号取偶（ch & ~1U），查询由 phase_channels 派生的 mask。
  * 奇数通道（互补输出侧）与其偶数对伴通道共享同一 bit，因此
  * 奇/偶通道均可正确判断是否位于互补对中。
  *
@@ -123,7 +126,7 @@ static inline uint32_t counter_freq(const struct pwm_ytm32_config *cfg,
 static inline bool channel_is_comp(const struct pwm_ytm32_config *cfg, uint32_t ch)
 {
 	uint32_t even = ch & ~1U;
-	return (cfg->comp_mask & BIT(even)) != 0U;
+	return (phase_complementary_mask(cfg) & BIT(even)) != 0U;
 }
 
 /**
@@ -148,8 +151,9 @@ static int pwm_ytm32_etmr_mask_outputs(const struct device *dev,
 					       uint16_t mask_value)
 {
 	const struct pwm_ytm32_config *cfg = dev->config;
+	uint8_t comp_mask = phase_complementary_mask(cfg);
 	uint8_t physical_mask =
-		pwm_ytm32_etmr_complementary_channel_mask(cfg->comp_mask);
+		pwm_ytm32_etmr_complementary_channel_mask(comp_mask);
 
 	/* Only the channels owned by this PWM instance are touched. */
 	mask_enable &= physical_mask;
@@ -181,8 +185,9 @@ int pwm_ytm32_etmr_force_safe(const struct device *dev)
 {
 	const struct pwm_ytm32_config *cfg = dev->config;
 	struct pwm_ytm32_data *data = dev->data;
+	uint8_t comp_mask = phase_complementary_mask(cfg);
 	uint8_t physical_mask =
-		pwm_ytm32_etmr_complementary_channel_mask(cfg->comp_mask);
+		pwm_ytm32_etmr_complementary_channel_mask(comp_mask);
 	int ret;
 
 	ret = pwm_ytm32_etmr_mask_outputs(dev, physical_mask, 0U);
@@ -271,18 +276,17 @@ static uint8_t pwm_ytm32_etmr_fault_active_inputs(
 		const struct device *dev)
 {
 	const struct pwm_ytm32_config *cfg = dev->config;
-	uint8_t raw_input_mask = 0U;
+	uint8_t status_mask = 0U;
 
 	for (uint8_t fault = 0U; fault < PWM_YTM32_ETMR_FAULT_COUNT; fault++) {
 		if ((cfg->fault_channels_mask & BIT(fault)) != 0U &&
 		    eTMR_DRV_GetFaultInputStatus(cfg->instance, fault) != 0U) {
-			raw_input_mask |= BIT(fault);
+			status_mask |= BIT(fault);
 		}
 	}
 
-	return pwm_ytm32_etmr_fault_active_mask(raw_input_mask,
-						cfg->fault_channels_mask,
-						cfg->fault_active_low_mask);
+	return pwm_ytm32_etmr_fault_status_active_mask(status_mask,
+							cfg->fault_channels_mask);
 }
 
 int pwm_ytm32_etmr_register_fault_cb(const struct device *dev,
@@ -694,7 +698,7 @@ void pwm_ytm32_update_3phase_isr(const struct device *dev,
  *   3. 调用 eTMR_DRV_Init：配置计数器时钟源、预分频、调试模式；
  *      etmrPrescaler 传 2^prescaler（而非 DT 原始位移值），否则 SDK
  *      会写入 CLKPRS = 0x7F（÷128）而非期望的分频比；
- *   4. 调用 eTMR_DRV_InitPwm：仅配置 comp_mask 选中的通道对，互补对使用中心对齐、
+ *   4. 调用 eTMR_DRV_InitPwm：仅配置由 phase_channels 派生的通道对，互补对使用中心对齐、
  *      插入死区；频率参数直接传 DT 的 pwm-frequency-hz（eTMR 是纯
  *      单向上升计数器，不需×2补偿；中心对齐靠对称 VAL0/VAL1 实现）；
  *   5. 若 adc_sync_trigger = true，调用 eTMR_DRV_SetOutputTrigger，
@@ -767,6 +771,7 @@ static int pwm_ytm32_init(const struct device *dev)
 	struct pwm_ytm32_data *data = dev->data;
 	struct pwm_ytm32_etmr_phase_map phase_map;
 	uint32_t clk_rate;
+	uint8_t comp_mask;
 	int phase_ret;
 	int ret;
 
@@ -778,11 +783,10 @@ static int pwm_ytm32_init(const struct device *dev)
 	atomic_set(&data->fault_count, 0);
 	atomic_set(&data->fault_status, 0);
 
+	comp_mask = phase_complementary_mask(cfg);
 	phase_ret = pwm_ytm32_etmr_phase_map_validate(cfg->phase_channels,
-							      cfg->comp_mask,
 							      &phase_map);
-	if (cfg->phase_channels_present &&
-	    (cfg->comp_mask & 0xAAU) == 0U && phase_ret == 0) {
+	if (cfg->phase_channels_present && comp_mask != 0U && phase_ret == 0) {
 		atomic_set(&data->phase_config_error, 0);
 	} else {
 		LOG_WRN("eTMR%u: invalid or absent three-phase channel map; "
@@ -856,11 +860,33 @@ static int pwm_ytm32_init(const struct device *dev)
 		.channelTrigParamConfig = NULL,
 	};
 
+	/*
+	 * The PWM update path writes CHxVAL0/CHxVAL1 and the overflow ISR then
+	 * calls eTMR_DRV_SyncWithSoftTrigger().  The SDK leaves register loading
+	 * disabled when syncMethod is NULL, which leaves CHx.CTRL.LDEN clear and
+	 * prevents those pending values from reaching the active compare
+	 * registers.  Keep the load path as a driver invariant: register loads
+	 * are selected by the software trigger, once per period, while counter
+	 * and output-mask loading remain tied to register loading.
+	 */
+	etmr_pwm_sync_t sync_cfg = {
+		.regSyncFreq            = 1U,
+		.regSyncSel             = REG_SYNC_WITH_TRIG,
+		.cntInitSyncSel         = CNT_SYNC_WITH_REG,
+		.maskOutputSyncSel      = CHMASK_SYNC_WITH_REG,
+		.regSyncTrigSrc         = SW_TRIGGER,
+		.cntInitSyncTrigSrc     = DISABLE_TRIGGER,
+		.maskOutputSyncTrigSrc  = DISABLE_TRIGGER,
+		.hwTrigFromTmuEnable    = false,
+		.hwTrigFromCimEnable    = false,
+		.hwTrigFromPadEnable    = false,
+	};
+
 	etmr_user_config_t user_cfg = {
 		.etmrClockSource = eTMR_CLOCK_SOURCE_INTERNALCLK,
 		.etmrPrescaler   = (uint8_t)BIT(prescaler),
 		.debugMode       = false,
-		.syncMethod      = NULL,
+		.syncMethod      = &sync_cfg,
 		.outputTrigConfig = NULL,
 		.isTofIntEnabled = true,
 	};
@@ -878,16 +904,16 @@ static int pwm_ytm32_init(const struct device *dev)
 	 */
 	data->etmr_state.etmrSourceClockFrequency = data->clk_rate;
 
-	/* 2. Build per-channel configs only for the complementary pairs enabled
-	 *    by the device-tree mask.  This prevents unselected channels from
-	 *    being initialized as PWM outputs by the vendor HAL. */
+	/* 2. Build per-channel configs only for the complementary pairs derived
+	 *    from phase_channels.  This prevents unselected channels from being
+	 *    initialized as PWM outputs by the vendor HAL. */
 	uint16_t dt_ticks = ns_to_ticks(cfg->deadtime_ns,
 					counter_freq(cfg, data));
 	etmr_pwm_ch_param_t ch_cfgs[ETMR_PAIR_COUNT];
 	uint8_t channel_count = 0U;
 
 	for (uint8_t ch = 0U; ch < ETMR_CH_COUNT; ch += 2U) {
-		if ((cfg->comp_mask & BIT(ch)) == 0U) {
+		if ((comp_mask & BIT(ch)) == 0U) {
 			continue;
 		}
 
@@ -901,7 +927,7 @@ static int pwm_ytm32_init(const struct device *dev)
 			.dutyCycle              = 0U,
 			.offset                 = 0U,
 			.enableSecondChannelOutput = true,
-			.secondChannelPolarity  = eTMR_POLARITY_INVERT,
+			.secondChannelPolarity  = eTMR_POLARITY_NORMAL,
 			.enableDoubleSwitch     = false,
 			.evenDeadTime            = dt_ticks,
 			.oddDeadTime             = dt_ticks,
@@ -921,9 +947,11 @@ static int pwm_ytm32_init(const struct device *dev)
 		fault_cfg.faultMode = cfg->fault_combinational ?
 			eTMR_FAULT_WITHOUT_CLK : eTMR_FAULT_WITH_CLK;
 
+		/* Motor-control safety invariant: every physical PWM input is low
+		 * after a fault.  This is intentionally fixed in the driver; a board
+		 * must not select high or tristate as a fault response. */
 		for (uint8_t channel = 0U; channel < ETMR_CH_COUNT; channel++) {
-			fault_cfg.safeState[channel] =
-				(etmr_safe_state_t)cfg->channel_safe_state[channel];
+			fault_cfg.safeState[channel] = eTMR_LOW_STATE;
 		}
 
 		for (uint8_t fault = 0U;
@@ -1096,11 +1124,6 @@ static const struct pwm_driver_api pwm_ytm32_driver_api = {
 		(DT_INST_PROP_BY_IDX(inst, ytmicro_phase_channels, index)), \
 		(0U))
 
-#define PWM_YTM32_FAULT_SAFE_STATE_INIT(inst, index) \
-	COND_CODE_1(DT_INST_NODE_HAS_PROP(inst, ytmicro_channel_safe_state), \
-		(DT_INST_PROP_BY_IDX(inst, ytmicro_channel_safe_state, index)), \
-		(0U))
-
 /**
  * ETMR_PWM_DEVICE_INIT(inst) - 展开单个 eTMR PWM 实例的全部注册代码
  *
@@ -1138,8 +1161,6 @@ static const struct pwm_driver_api pwm_ytm32_driver_api = {
 			     DT_INST_CLOCKS_CELL(inst, id),		\
 		.prescaler = DT_INST_PROP_OR(inst, ytmicro_prescaler, 0),\
 		.pincfg    = PINCTRL_DT_INST_DEV_CONFIG_GET(inst),	\
-		.comp_mask = DT_INST_PROP_OR(inst,			\
-				ytmicro_complementary_channels_mask, 0),\
 		.deadtime_ns = DT_INST_PROP_OR(inst,			\
 				ytmicro_deadtime_ns, 0),		\
 		.pwm_freq_hz = DT_INST_PROP_OR(inst,			\
@@ -1174,16 +1195,6 @@ static const struct pwm_driver_api pwm_ytm32_driver_api = {
 				ytmicro_fault_recovery, 0),			\
 		.fault_auto_mode = DT_INST_PROP_OR(inst,		\
 				ytmicro_fault_auto_mode, 0),			\
-		.channel_safe_state = {					\
-			PWM_YTM32_FAULT_SAFE_STATE_INIT(inst, 0),	\
-			PWM_YTM32_FAULT_SAFE_STATE_INIT(inst, 1),	\
-			PWM_YTM32_FAULT_SAFE_STATE_INIT(inst, 2),	\
-			PWM_YTM32_FAULT_SAFE_STATE_INIT(inst, 3),	\
-			PWM_YTM32_FAULT_SAFE_STATE_INIT(inst, 4),	\
-			PWM_YTM32_FAULT_SAFE_STATE_INIT(inst, 5),	\
-			PWM_YTM32_FAULT_SAFE_STATE_INIT(inst, 6),	\
-			PWM_YTM32_FAULT_SAFE_STATE_INIT(inst, 7),	\
-		},							\
 	};								\
 									\
 	static struct pwm_ytm32_data pwm_ytm32_data_##inst;		\

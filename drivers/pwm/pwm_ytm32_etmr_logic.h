@@ -22,34 +22,60 @@ struct pwm_ytm32_etmr_phase_map {
 };
 
 /*
- * Validate the three even channels used by the phase fast path.  The
- * complementary-pair mask contains even channel bits only; each selected
- * phase owns that channel and its following odd channel.
+ * Derive the complementary-pair mask from the three phase channels.  The
+ * phase list is the single source of truth: each even phase channel owns
+ * that channel and its following odd channel.  Return zero for an invalid
+ * list so callers cannot accidentally initialize a partial map.
  */
+static inline uint8_t pwm_ytm32_etmr_phase_complementary_mask(
+	const uint8_t phase_channel[PWM_YTM32_ETMR_PHASE_COUNT])
+{
+	uint8_t mask = 0U;
+
+	if (phase_channel == NULL) {
+		return 0U;
+	}
+
+	for (size_t i = 0U; i < PWM_YTM32_ETMR_PHASE_COUNT; i++) {
+		uint8_t channel = phase_channel[i];
+		uint8_t bit;
+
+		if (channel >= PWM_YTM32_ETMR_CHANNEL_COUNT ||
+		    (channel & 1U) != 0U) {
+			return 0U;
+		}
+
+		bit = (uint8_t)(1U << channel);
+		if ((mask & bit) != 0U) {
+			return 0U;
+		}
+
+		mask |= bit;
+	}
+
+	return mask;
+}
+
+/* Validate the three even channels used by the phase fast path. */
 static inline int pwm_ytm32_etmr_phase_map_validate(
 	const uint8_t phase_channel[PWM_YTM32_ETMR_PHASE_COUNT],
-	uint8_t complementary_mask,
 	struct pwm_ytm32_etmr_phase_map *map)
 {
+	uint8_t complementary_mask;
+
 	if (phase_channel == NULL || map == NULL) {
+		return -EINVAL;
+	}
+
+	complementary_mask =
+		pwm_ytm32_etmr_phase_complementary_mask(phase_channel);
+	if (complementary_mask == 0U) {
 		return -EINVAL;
 	}
 
 	map->channel_mask = 0U;
 	for (size_t i = 0U; i < PWM_YTM32_ETMR_PHASE_COUNT; i++) {
 		uint8_t channel = phase_channel[i];
-
-		if (channel >= PWM_YTM32_ETMR_CHANNEL_COUNT ||
-		    (channel & 1U) != 0U ||
-		    (complementary_mask & (uint8_t)(1U << channel)) == 0U) {
-			return -EINVAL;
-		}
-
-		for (size_t previous = 0U; previous < i; previous++) {
-			if (phase_channel[previous] == channel) {
-				return -EINVAL;
-			}
-		}
 
 		map->phase_channel[i] = channel;
 		map->channel_mask |= (uint8_t)(3U << channel);
@@ -79,6 +105,18 @@ static inline uint8_t pwm_ytm32_etmr_fault_active_mask(
 	uint8_t active_low = (uint8_t)((uint8_t)~raw_input_mask & active_low_mask);
 
 	return (uint8_t)((active_high | active_low) & configured_mask & 0x0FU);
+}
+
+/*
+ * eTMR_DRV_GetFaultInputStatus() returns IOSTS.Fx.  The eTMR hardware has
+ * already applied FAULT[FxPOL], so a one means that the input is currently
+ * fault-active and a zero means that it is idle.  Do not apply the board
+ * polarity a second time here.
+ */
+static inline uint8_t pwm_ytm32_etmr_fault_status_active_mask(
+	uint8_t status_mask, uint8_t configured_mask)
+{
+	return (uint8_t)(status_mask & configured_mask & 0x0FU);
 }
 
 /*

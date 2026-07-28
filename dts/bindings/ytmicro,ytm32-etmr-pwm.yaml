@@ -49,25 +49,15 @@ properties:
       eTMR internal clock prescaler. Counter clock = functional_clock >> prescaler.
       Valid range 0-7 (divide by 1, 2, 4, 8, 16, 32, 64, 128).
 
-  ytmicro,complementary-channels-mask:
-    type: int
-    required: false
-    default: 0
-    description: |
-      Bitmask of even channel IDs that drive complementary pairs.
-      Bit N set means channel N (must be even) and channel N+1 form a
-      complementary pair with center-aligned PWM and dead-time insertion.
-      Example: 0x15 (0b00010101) enables pairs CH0/CH1, CH2/CH3, CH4/CH5.
-
   ytmicro,phase-channels:
     type: array
     required: false
     description: |
       Even eTMR channel IDs for phase A, phase B, and phase C in the
-      three-phase ISR fast path.  Every channel must be an enabled bit in
-      ytmicro,complementary-channels-mask; its following odd channel is the
-      complementary output.  The driver rejects odd, duplicate, or
-      out-of-range entries and keeps the outputs masked when the property is
+      three-phase ISR fast path.  Each entry defines a complementary pair:
+      the even channel and its following odd channel.  The driver derives
+      the pair mask from this property, rejects odd, duplicate, or
+      out-of-range entries, and keeps the outputs masked when the property is
       absent or invalid.
 
   ytmicro,deadtime-ns:
@@ -76,7 +66,7 @@ properties:
     default: 0
     description: |
       Dead-time insertion in nanoseconds, applied identically to all
-      complementary pairs defined by ytmicro,complementary-channels-mask.
+      complementary pairs derived from ytmicro,phase-channels.
 
   ytmicro,pwm-frequency-hz:
     type: int
@@ -172,13 +162,6 @@ properties:
     description: |
       Fault automatic recovery mode.  0 requires manual flag clear before
       recovery; motor-control boards must use 0.
-
-  ytmicro,channel-safe-state:
-    type: array
-    required: false
-    description: |
-      Per-channel fault safe state for CH0..CH7: 0 low, 1 high, 2
-      tristate.  An absent property defaults every channel to low.
 
   ytmicro,autostart:
     type: boolean
