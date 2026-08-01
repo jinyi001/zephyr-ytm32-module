@@ -148,6 +148,7 @@ they are findable. Update it when you add a workaround.
 | ADC E600001 (vendor `ADC_ERRATA_E0002`) | `adc/adc_ytm32.c` top-of-file | First channel of an idle-then-triggered sequence reads inaccurately. Mitigated by HAL `ADC_Enable()` IPC-reset, gated by the `ADC_ERRATA_E0002` macro; the driver `#error`s if a HAL bump drops the macro. |
 | ADC MD1 ADSTART stale gate | `adc/adc_ytm32.c` `adc_ytm32_arm_hw_trigger()` | HW-trigger accept gate not reliably armed after enable; cleared via `ADSTOP`→`ADSTART` with a bare counter loop (`k_busy_wait` disturbs the timing). |
 | DMA E406002 | `dma/ytm32_dma_hal.c` | `maxChannelForChLink` config gated by `FEATURE_DMA_ERRATA_E406002`. |
+| SPI E403002 | `spi/ytm32_spi_hal.c` `ytm32_spi_hal_sync_txcfg()` | A `TXCFG` write needs about three SPI functional-clock cycles followed by a read of another register before `TXCFG` is read again. The adapter waits in the system cycle-counter domain and reads `STS` after successful vendor init/configure calls. |
 
 ---
 

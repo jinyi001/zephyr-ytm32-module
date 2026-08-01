@@ -15,6 +15,34 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+/* YTM32B1M erratum E403002 requires three SPI functional-clock cycles. */
+#define YTM32_SPI_TXCFG_SYNC_FUNCTIONAL_CYCLES 3U
+
+/*
+ * Convert the E403002 delay to the system cycle-counter domain.  Keep this
+ * arithmetic vendor-independent so it can be covered by the native unit test.
+ */
+static inline uint32_t ytm32_spi_hal_txcfg_sync_cycles(uint32_t counter_rate,
+						       uint32_t spi_clock_rate)
+{
+	uint64_t required_cycles;
+
+	if ((counter_rate == 0U) || (spi_clock_rate == 0U)) {
+		return 1U;
+	}
+
+	required_cycles =
+		((uint64_t)counter_rate * YTM32_SPI_TXCFG_SYNC_FUNCTIONAL_CYCLES +
+		 spi_clock_rate - 1U) /
+		spi_clock_rate;
+
+	if (required_cycles > UINT32_MAX) {
+		return UINT32_MAX;
+	}
+
+	return (required_cycles == 0U) ? 1U : (uint32_t)required_cycles;
+}
+
 /*
  * Completion callback invoked from ISR context when a transfer finishes.
  *   user_data : value provided to ytm32_spi_hal_init

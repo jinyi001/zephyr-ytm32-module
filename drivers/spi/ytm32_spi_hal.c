@@ -11,6 +11,9 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include <zephyr/kernel.h>
+#include <zephyr/sys/time_units.h>
+
 /*
  * The vendor HAL defines spi_callback_t with a different signature than
  * Zephyr's spi_callback_t. Rename the vendor typedef for the duration of
@@ -19,6 +22,7 @@
 #define spi_callback_t hal_spi_callback_t
 #include "spi_master_driver.h"
 #undef spi_callback_t
+#include "spi_hw_access.h"
 
 #include "ytm32_spi_hal.h"
 
@@ -28,6 +32,7 @@ struct spi_inst_ctx {
 	spi_state_t     hal_state;
 	ytm32_spi_cb_t  cb;
 	void           *cb_data;
+	uint32_t         txcfg_sync_cycles;
 	bool            use_dma;
 	uint8_t         dma_rx_ch;
 	uint8_t         dma_tx_ch;
@@ -45,6 +50,27 @@ static int status_to_errno(status_t s)
 	case STATUS_TIMEOUT: return -ETIMEDOUT;
 	default:             return -EIO;
 	}
+}
+
+/*
+ * YTM32B1M erratum E403002: after TXCFG is written, wait for about three SPI
+ * functional-clock cycles and read a different SPI register before TXCFG is
+ * read again.  The vendor configure functions end by writing TXCFG, while a
+ * subsequent transfer can perform TXCFG read-modify-write operations.
+ *
+ * Keep the workaround in this adapter instead of modifying the imported HAL.
+ * SPI_GetStatusFlag() performs the required volatile read from STS.
+ */
+static void ytm32_spi_hal_sync_txcfg(uint8_t instance)
+{
+	uint32_t start_cycles = k_cycle_get_32();
+
+	while ((uint32_t)(k_cycle_get_32() - start_cycles) <
+	       s_spi[instance].txcfg_sync_cycles) {
+		/* The cycle counter bounds this wait independently of compiler timing. */
+	}
+
+	(void)SPI_GetStatusFlag(g_spiBase[instance], SPI_MODULE_BUSY);
 }
 
 /*
@@ -123,6 +149,8 @@ int ytm32_spi_hal_init(uint8_t instance, uint32_t clock_rate,
 
 	ctx->cb        = cb;
 	ctx->cb_data   = user_data;
+	ctx->txcfg_sync_cycles = ytm32_spi_hal_txcfg_sync_cycles(
+		sys_clock_hw_cycles_per_sec(), clock_rate);
 	ctx->use_dma   = use_dma;
 	ctx->dma_rx_ch = dma_rx_ch;
 	ctx->dma_tx_ch = dma_tx_ch;
@@ -140,6 +168,11 @@ int ytm32_spi_hal_init(uint8_t instance, uint32_t clock_rate,
 			&hal_cfg);
 
 	status_t s = SPI_DRV_MasterInit(instance, &ctx->hal_state, &hal_cfg);
+
+	if (s == STATUS_SUCCESS) {
+		ytm32_spi_hal_sync_txcfg(instance);
+	}
+
 	return status_to_errno(s);
 }
 
@@ -154,6 +187,11 @@ int ytm32_spi_hal_configure(uint8_t instance, uint32_t freq,
 			cs_active_hi, gpio_cs, &hal_cfg);
 
 	status_t s = SPI_DRV_MasterConfigureBus(instance, &hal_cfg, &calc_baud);
+
+	if (s == STATUS_SUCCESS) {
+		ytm32_spi_hal_sync_txcfg(instance);
+	}
+
 	return status_to_errno(s);
 }
 

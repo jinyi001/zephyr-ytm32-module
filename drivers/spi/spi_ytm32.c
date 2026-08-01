@@ -477,6 +477,17 @@ static int spi_ytm32_init(const struct device *dev)
 		return ret;
 	}
 
+	/*
+	 * Drive every GPIO chip select inactive before any client can use the
+	 * shared bus.  Configuring only the first device's CS leaves the other
+	 * CS pins as floating inputs; two slaves can then drive MISO together.
+	 */
+	ret = spi_context_cs_configure_all(&data->ctx);
+	if (ret < 0) {
+		LOG_ERR("failed to initialize SPI chip selects: %d", ret);
+		return ret;
+	}
+
 #ifdef CONFIG_SPI_YTM32_DMA
 	if (cfg->dma_dev != NULL && device_is_ready(cfg->dma_dev)) {
 		/*
@@ -578,6 +589,7 @@ static DEVICE_API(spi, spi_ytm32_api) = {
 	static struct spi_ytm32_data spi_ytm32_data_##n = { \
 		SPI_CONTEXT_INIT_LOCK(spi_ytm32_data_##n, ctx), \
 		SPI_CONTEXT_INIT_SYNC(spi_ytm32_data_##n, ctx), \
+		SPI_CONTEXT_CS_GPIOS_INITIALIZE(DT_DRV_INST(n), ctx) \
 	}; \
 	static const struct spi_ytm32_config spi_ytm32_config_##n = { \
 		.base            = DT_INST_REG_ADDR(n), \

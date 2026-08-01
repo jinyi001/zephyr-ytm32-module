@@ -9,6 +9,7 @@
 #include <zephyr/ztest.h>
 
 #include "spi_ytm32_transaction.h"
+#include "ytm32_spi_hal.h"
 
 struct blocking_thread_context {
 	struct spi_ytm32_transaction *transaction;
@@ -237,6 +238,20 @@ ZTEST(spi_transaction, test_async_config_switch_cs_and_error_recovery)
 	zassert_ok(spi_ytm32_transaction_blocking_acquire(
 		&fake_bus.transaction, K_NO_WAIT));
 	spi_ytm32_transaction_release(&fake_bus.transaction);
+}
+
+ZTEST(spi_transaction, test_txcfg_errata_delay_uses_three_functional_cycles)
+{
+	zassert_equal(ytm32_spi_hal_txcfg_sync_cycles(120000000U, 96000000U),
+		      4U);
+	zassert_equal(ytm32_spi_hal_txcfg_sync_cycles(120000000U, 80000000U),
+		      5U);
+	zassert_equal(ytm32_spi_hal_txcfg_sync_cycles(96000000U, 96000000U),
+		      3U);
+	zassert_equal(ytm32_spi_hal_txcfg_sync_cycles(16000000U, 96000000U),
+		      1U);
+	zassert_equal(ytm32_spi_hal_txcfg_sync_cycles(0U, 96000000U), 1U);
+	zassert_equal(ytm32_spi_hal_txcfg_sync_cycles(120000000U, 0U), 1U);
 }
 
 ZTEST_SUITE(spi_transaction, NULL, spi_transaction_setup, NULL, NULL, NULL);
