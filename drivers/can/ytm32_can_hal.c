@@ -198,15 +198,24 @@ int ytm32_can_hal_init(uint8_t instance, uint32_t clock_hz,
 	cfg.flexcanMode       = FLEXCAN_FREEZE_MODE;
 	cfg.transfer_type     = FLEXCAN_RXFIFO_USING_INTERRUPTS;
 
-	cfg.bitrate.propSeg    = timing->prop_seg;
-	cfg.bitrate.phaseSeg1  = timing->phase_seg1;
-	cfg.bitrate.phaseSeg2  = timing->phase_seg2;
-	/* SDK register field = physical - 1 */
+	/* The vendor SDK timing fields are register values: physical - 1. */
+	cfg.bitrate.propSeg    = timing->prop_seg - 1U;
+	cfg.bitrate.phaseSeg1  = timing->phase_seg1 - 1U;
+	cfg.bitrate.phaseSeg2  = timing->phase_seg2 - 1U;
 	cfg.bitrate.preDivider = timing->prescaler - 1U;
 	cfg.bitrate.rJumpwidth = timing->sjw - 1U;
 
 #if FEATURE_CAN_HAS_PE_CLKSRC_SELECT
-	cfg.pe_clock = FLEXCAN_CLK_SOURCE_PERIPH;
+	/*
+	 * The CAN timing passed by the Zephyr driver is calculated from the
+	 * functional clock returned for the CAN peripheral.  On MD1 the vendor
+	 * FlexCAN default path uses the oscillator as the protocol-engine clock;
+	 * selecting the peripheral clock here makes the register timing and the
+	 * physical bit rate disagree when the peripheral clock tree differs from
+	 * FXOSC.  Keep the PE source aligned with the timing calculation and the
+	 * board's 16 MHz oscillator.
+	 */
+	cfg.pe_clock = FLEXCAN_CLK_SOURCE_OSC;
 #endif
 
 #if FEATURE_CAN_HAS_FD
@@ -237,10 +246,11 @@ int ytm32_can_hal_init(uint8_t instance, uint32_t clock_hz,
 int ytm32_can_hal_set_timing(uint8_t instance,
 			     const struct ytm32_can_timing *timing)
 {
+	/* The vendor SDK fields are register encodings: physical value - 1. */
 	flexcan_time_segment_t t = {
-		.propSeg    = timing->prop_seg,
-		.phaseSeg1  = timing->phase_seg1,
-		.phaseSeg2  = timing->phase_seg2,
+		.propSeg    = timing->prop_seg - 1U,
+		.phaseSeg1  = timing->phase_seg1 - 1U,
+		.phaseSeg2  = timing->phase_seg2 - 1U,
 		.preDivider = timing->prescaler - 1U,
 		.rJumpwidth = timing->sjw - 1U,
 	};
@@ -291,7 +301,13 @@ int ytm32_can_hal_set_mode(uint8_t instance, ytm32_can_mode_t mode)
 		return -EINVAL;
 	}
 
-	FLEXCAN_SetOperationMode(s_bases[instance], sdk_mode);
+	CAN_Type *base = s_bases[instance];
+
+	FLEXCAN_SetOperationMode(base, sdk_mode);
+	/* SetOperationMode(NORMAL/LISTEN/LOOPBACK) does not leave freeze. */
+	if (mode != YTM32_CAN_MODE_FREEZE) {
+		FLEXCAN_ExitFreezeMode(base);
+	}
 	return 0;
 }
 

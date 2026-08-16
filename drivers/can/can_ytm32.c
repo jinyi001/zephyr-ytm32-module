@@ -13,6 +13,7 @@
 
 #include <zephyr/device.h>
 #include <zephyr/drivers/can.h>
+#include <zephyr/drivers/can/transceiver.h>
 #include <zephyr/drivers/clock_control.h>
 #include <zephyr/drivers/pinctrl.h>
 #include <zephyr/irq.h>
@@ -220,10 +221,23 @@ static int can_ytm32_start(const struct device *dev)
 		return -EALREADY;
 	}
 
+	/* Bring the TCAN3413 out of standby for this controller start. */
+	if (cfg->common.phy != NULL) {
+		ret = can_transceiver_enable(cfg->common.phy, data->common.mode);
+		if (ret != 0) {
+			LOG_ERR("CAN%u: transceiver enable failed: %d",
+				cfg->instance, ret);
+			goto out;
+		}
+	}
+
 	/* Apply pending timing before leaving freeze. */
 	if (data->timing_valid) {
 		ret = ytm32_can_hal_set_timing(cfg->instance, &data->timing);
 		if (ret < 0) {
+			if (cfg->common.phy != NULL) {
+				(void)can_transceiver_disable(cfg->common.phy);
+			}
 			goto out;
 		}
 	}
@@ -275,6 +289,8 @@ static int can_ytm32_start(const struct device *dev)
 							   (uint8_t)i);
 			}
 		}
+	} else if (cfg->common.phy != NULL) {
+		(void)can_transceiver_disable(cfg->common.phy);
 	}
 
 out:
@@ -298,6 +314,10 @@ static int can_ytm32_stop(const struct device *dev)
 	ret = ytm32_can_hal_set_mode(cfg->instance, YTM32_CAN_MODE_FREEZE);
 	if (ret == 0) {
 		data->common.started = false;
+
+		if (cfg->common.phy != NULL) {
+			ret = can_transceiver_disable(cfg->common.phy);
+		}
 
 		/* Abort pending TX and release semaphore slots. */
 		for (int i = 0; i < cfg->tx_mb_count; i++) {
