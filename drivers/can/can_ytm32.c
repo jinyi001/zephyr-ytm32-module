@@ -931,6 +931,12 @@ static DEVICE_API(can, can_ytm32_driver_api) = {
 
 /* ──────────────────────── per-instance instantiation ──────────────────── */
 
+#if defined(CONFIG_CAN_FD_MODE)
+#define YTM32_CAN_SUPPORTS_FD(inst) DT_INST_PROP(inst, supports_fd)
+#else
+#define YTM32_CAN_SUPPORTS_FD(inst) false
+#endif
+
 #define YTM32_CAN_INIT(inst)							\
 	PINCTRL_DT_INST_DEFINE(inst);						\
 										\
@@ -945,7 +951,7 @@ static DEVICE_API(can, can_ytm32_driver_api) = {
 		.max_mb        = DT_INST_PROP(inst, max_mb),			\
 		.rx_mb_count   = DT_INST_PROP(inst, rx_mb_count),		\
 		.tx_mb_count   = DT_INST_PROP(inst, tx_mb_count),		\
-		.supports_fd   = DT_INST_PROP(inst, supports_fd),		\
+		.supports_fd   = YTM32_CAN_SUPPORTS_FD(inst),			\
 		.clock_dev     = DEVICE_DT_GET(DT_INST_CLOCKS_CTLR(inst)),	\
 		.clock_subsys  = (clock_control_subsys_t)			\
 				 DT_INST_CLOCKS_CELL(inst, id),			\
