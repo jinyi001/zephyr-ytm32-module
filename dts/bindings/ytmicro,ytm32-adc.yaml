@@ -84,8 +84,10 @@ properties:
     description: |
       Optional explicit ADC sequence order. Each entry is a Zephyr ADC
       channel number. When present, it must contain every bit selected by the
-      adc_sequence.channels mask exactly once; a mismatch is an error. When
-      absent, selected channels are emitted in ascending channel order.
+      adc_sequence.channels mask at least once. A selected channel may be
+      repeated to provide a sacrificial conversion for ADC E600001; an
+      unselected channel or a partial mask is an error. When absent, selected
+      channels are emitted in ascending channel order without duplicates.
 
   dmas:
     type: phandle-array

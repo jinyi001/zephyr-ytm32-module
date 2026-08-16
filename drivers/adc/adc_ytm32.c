@@ -145,7 +145,7 @@ adc_resolution_t adc_ytm32_bits_to_resolution(uint8_t bits)
 	}
 }
 
-uint8_t adc_ytm32_channels_to_sequence(uint32_t channels_mask,
+uint8_t adc_ytm32_channels_to_sequence(uint64_t channels_mask,
 				       adc_inputchannel_t *chsel,
 				       uint8_t *sample_times,
 				       uint8_t *max_smp_out)
@@ -176,7 +176,7 @@ uint8_t adc_ytm32_channels_to_sequence(uint32_t channels_mask,
 }
 
 int adc_ytm32_sequence_from_config(const struct adc_ytm32_config *config,
-					   uint32_t channels_mask,
+					   uint64_t channels_mask,
 					   adc_inputchannel_t *chsel,
 					   const uint8_t *sample_times,
 					   uint8_t *channel_count_out,

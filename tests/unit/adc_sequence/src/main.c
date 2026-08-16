@@ -12,9 +12,9 @@
 #include "adc_ytm32_logic.h"
 
 #define ADC_SEQUENCE_SLOTS 8U
-#define ADC_SAMPLE_TIME_COUNT 32U
+#define ADC_SAMPLE_TIME_COUNT 38U
 
-static void adc_sequence_expand(uint32_t mask, const uint8_t *order,
+static void adc_sequence_expand(uint64_t mask, const uint8_t *order,
 				uint8_t order_count, uint8_t *sequence,
 				uint8_t *count, uint8_t *max_smp)
 {
@@ -56,10 +56,37 @@ ZTEST(adc_sequence, test_empty_order_keeps_ascending_compatibility)
 	zassert_mem_equal(sequence, expected, ARRAY_SIZE(expected), NULL);
 }
 
-ZTEST(adc_sequence, test_explicit_order_must_match_mask_exactly)
+ZTEST(adc_sequence, test_internal_reference_channels_are_supported)
+{
+	static const uint8_t order[] = {33U, 34U, 35U, 37U};
+	uint8_t sequence[ADC_SEQUENCE_SLOTS] = {0};
+	uint8_t count;
+	uint8_t max_smp;
+	uint64_t mask = BIT64(33) | BIT64(34) | BIT64(35) | BIT64(37);
+
+	adc_sequence_expand(mask, order, ARRAY_SIZE(order), sequence, &count,
+			    &max_smp);
+	zassert_equal(count, ARRAY_SIZE(order), NULL);
+	zassert_mem_equal(sequence, order, ARRAY_SIZE(order), NULL);
+}
+
+ZTEST(adc_sequence, test_explicit_order_allows_errata_dummy_duplicate)
+{
+	static const uint8_t order[] = {16U, 16U, 1U, 0U, 4U};
+	uint8_t sequence[ADC_SEQUENCE_SLOTS] = {0};
+	uint8_t count;
+	uint8_t max_smp;
+	uint64_t mask = BIT64(16) | BIT64(1) | BIT64(0) | BIT64(4);
+
+	adc_sequence_expand(mask, order, ARRAY_SIZE(order), sequence, &count,
+			    &max_smp);
+	zassert_equal(count, ARRAY_SIZE(order), NULL);
+	zassert_mem_equal(sequence, order, ARRAY_SIZE(order), NULL);
+}
+
+ZTEST(adc_sequence, test_explicit_order_must_cover_mask_without_extras)
 {
 	static const uint8_t partial[] = {16U, 1U};
-	static const uint8_t duplicate[] = {16U, 1U, 1U, 4U};
 	static const uint8_t unselected[] = {16U, 2U, 0U, 4U};
 	uint8_t sequence[ADC_SEQUENCE_SLOTS] = {0};
 	uint8_t count;
@@ -74,11 +101,6 @@ ZTEST(adc_sequence, test_explicit_order_must_match_mask_exactly)
 					sequence, sample_times,
 					ADC_SAMPLE_TIME_COUNT, &count, &max_smp), -EINVAL,
 				"partial order must be rejected");
-	zassert_equal(adc_ytm32_sequence_expand(mask, duplicate,
-					ARRAY_SIZE(duplicate), ADC_SEQUENCE_SLOTS,
-					sequence, sample_times,
-					ADC_SAMPLE_TIME_COUNT, &count, &max_smp), -EINVAL,
-				"duplicate order entry must be rejected");
 	zassert_equal(adc_ytm32_sequence_expand(mask, unselected,
 					ARRAY_SIZE(unselected), ADC_SEQUENCE_SLOTS,
 					sequence, sample_times,
@@ -99,6 +121,37 @@ ZTEST(adc_sequence, test_ds_v19_timing_boundaries)
 	zassert_equal(adc_ytm32_validate_timing(32000000U, 8U, 62U), -ERANGE,
 			      "startup time below 2 us");
 	zassert_equal(adc_ytm32_ticks_to_ns(64U, 32000000U), 2000U, NULL);
+}
+
+ZTEST(adc_sequence, test_dma_full_sequence_trigger_plan_is_compatible)
+{
+	uint32_t triggers;
+
+	zassert_ok(adc_ytm32_dma_trigger_plan(
+		ADC_YTM32_DMA_SEQUENCE_FULL, false, 5U, 4U, &triggers), NULL);
+	zassert_equal(triggers, 4U, "FULL needs one trigger per sequence");
+}
+
+ZTEST(adc_sequence, test_dma_step_trigger_plan_advances_one_slot)
+{
+	uint32_t triggers;
+
+	zassert_ok(adc_ytm32_dma_trigger_plan(
+		ADC_YTM32_DMA_SEQUENCE_STEP, true, 4U, 4U, &triggers), NULL);
+	zassert_equal(triggers, 16U,
+		"STEP needs one trigger per slot in every buffered sequence");
+}
+
+ZTEST(adc_sequence, test_dma_step_requires_hardware_trigger)
+{
+	uint32_t triggers;
+
+	zassert_equal(adc_ytm32_dma_trigger_plan(
+		ADC_YTM32_DMA_SEQUENCE_STEP, false, 4U, 1U, &triggers),
+		-ENOTSUP, NULL);
+	zassert_equal(adc_ytm32_dma_trigger_plan(
+		(enum adc_ytm32_dma_sequence_mode)2, true, 4U, 1U,
+		&triggers), -EINVAL, NULL);
 }
 
 ZTEST_SUITE(adc_sequence, NULL, NULL, NULL, NULL, NULL);

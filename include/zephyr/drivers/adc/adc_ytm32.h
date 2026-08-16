@@ -14,8 +14,8 @@
  *   1. Configure channels with adc_channel_setup() as normal.
  *   2. Allocate a buffer of channel_count * depth * sizeof(uint16_t) bytes.
  *   3. Call adc_ytm32_dma_start() once.
- *   4. The callback fires every 'depth' conversions with a pointer to the
- *      filled buffer.  The callback runs in ISR context and does NOT re-arm
+ *   4. The callback fires every filled DMA batch with a pointer to the
+ *      buffer.  The callback runs in ISR context and does NOT re-arm
  *      (to avoid ISR starvation in continuous mode).  Call
  *      adc_ytm32_dma_resume() from thread context for the next batch, or
  *      adc_ytm32_dma_stop() to halt.
@@ -96,11 +96,35 @@ enum adc_ytm32_dma_trigger {
 };
 
 /**
+ * @brief Hardware-triggered ADC sequence execution mode.
+ */
+enum adc_ytm32_dma_sequence_mode {
+	/** Convert the complete programmed sequence on every trigger. */
+	ADC_YTM32_DMA_SEQUENCE_FULL = 0,
+	/** Convert one sequence slot per trigger and advance to the next slot. */
+	ADC_YTM32_DMA_SEQUENCE_STEP,
+};
+
+/**
  * @brief Configuration for DMA continuous sampling.
  */
 struct adc_ytm32_dma_config {
-	/** Channel bitmask — same semantics as adc_sequence.channels. */
-	uint32_t channels;
+	/**
+	 * Channel-selector bitmask.  Bits 0..31 match adc_sequence.channels;
+	 * bits 32..37 select the MD1 internal temperature/reference/rail inputs.
+	 */
+	uint64_t channels;
+
+	/**
+	 * Optional explicit sequence order for this DMA run.  NULL with count 0
+	 * uses ytmicro,sequence-order from devicetree.  A non-empty override must
+	 * list every selected channel at least once. Selected channels may be
+	 * repeated, for example to discard an E600001 sacrificial first
+	 * conversion. It remains hardware-triggered when @p trigger selects
+	 * hardware mode.
+	 */
+	const uint8_t *sequence_order;
+	uint8_t sequence_order_count;
 
 	/**
 	 * Trigger mode.  Defaults to ADC_YTM32_DMA_TRIGGER_SOFTWARE (0), the
@@ -109,18 +133,29 @@ struct adc_ytm32_dma_config {
 	 */
 	enum adc_ytm32_dma_trigger trigger;
 
+	/**
+	 * Sequence execution mode.  FULL is the backward-compatible default.
+	 * STEP is supported only with the hardware trigger and converts one
+	 * programmed slot per trigger.  The FIFO/DMA still presents complete
+	 * sequences to callbacks, so the buffer layout does not change.
+	 */
+	enum adc_ytm32_dma_sequence_mode sequence_mode;
+
 	/** ADC resolution: 6, 8, 10, or 12 bits. */
 	uint8_t resolution;
 
 	/**
 	 * Pre-allocated sample buffer.
-	 * Required size: POPCOUNT(channels) * depth * sizeof(uint16_t).
+	 * Required size: sequence_order_count * depth * sizeof(uint16_t) when an
+	 * explicit order is supplied, otherwise POPCOUNT(channels) * depth *
+	 * sizeof(uint16_t).
 	 */
 	uint16_t *buf;
 
 	/**
-	 * Number of complete ADC sequences (PWM periods) per callback.
-	 * Higher values reduce callback rate but increase latency.
+	 * Number of complete ADC sequences per callback.  FULL consumes one
+	 * hardware trigger per sequence; STEP consumes channel_count triggers per
+	 * sequence.  Higher values reduce callback rate but increase latency.
 	 */
 	uint16_t depth;
 
@@ -154,8 +189,8 @@ struct adc_ytm32_timing {
 /**
  * @brief Start DMA continuous sampling.
  *
- * Arms the DMA channel to drain the ADC FIFO into buf on every sequence
- * completion; the callback fires once per 'depth' sequences.  The DMA top-half
+ * Arms the DMA channel to drain the ADC FIFO into buf on every complete
+ * sequence; the callback fires once per 'depth' sequences.  The DMA top-half
  * stops the channel before invoking callbacks; call adc_ytm32_dma_resume() from
  * thread context to collect the next batch.
  *
@@ -165,6 +200,11 @@ struct adc_ytm32_timing {
  * - ADC_YTM32_DMA_TRIGGER_HARDWARE: PWM-synchronised via eTMR→TMU.  Requires
  *   ytmicro,hw-trigger-source + ytmicro,tmu in DTS and a running eTMR with the
  *   board-selected trigger source enabled (INIT_TRIG or EXT_TRIG).
+ *
+ * Sequence mode (cfg->sequence_mode):
+ * - ADC_YTM32_DMA_SEQUENCE_FULL (default): one complete sequence per trigger.
+ * - ADC_YTM32_DMA_SEQUENCE_STEP: one slot per hardware trigger; after all slots
+ *   have converted, DMA drains one complete sequence in the normal layout.
  *
  * The calling code is responsible for ensuring:
  * - adc_channel_setup() has been called for every channel in cfg->channels.

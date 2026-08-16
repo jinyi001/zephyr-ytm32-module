@@ -35,7 +35,7 @@
 #include "device_registers.h"
 #include "adc_driver.h"
 
-/* Maximum external channel count across all YTM32 variants */
+/* MD1 selectors 0..31 are external and 32..37 are internal channels. */
 #define YTM32_ADC_MAX_CHANS 38U
 
 /* SMP=2 gives t_sample=125 ns at 32 MHz and 1 us at 4 MHz. */
@@ -94,13 +94,13 @@ struct adc_ytm32_shared *adc_ytm32_shared(const struct device *dev);
 
 adc_resolution_t adc_ytm32_bits_to_resolution(uint8_t bits);
 
-uint8_t adc_ytm32_channels_to_sequence(uint32_t channels_mask,
+uint8_t adc_ytm32_channels_to_sequence(uint64_t channels_mask,
 					adc_inputchannel_t *chsel,
 					uint8_t *sample_times,
 					uint8_t *max_smp_out);
 
 int adc_ytm32_sequence_from_config(const struct adc_ytm32_config *config,
-					   uint32_t channels_mask,
+					   uint64_t channels_mask,
 					   adc_inputchannel_t *chsel,
 					   const uint8_t *sample_times,
 					   uint8_t *channel_count_out,

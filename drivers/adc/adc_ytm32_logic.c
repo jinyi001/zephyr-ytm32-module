@@ -9,7 +9,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-int adc_ytm32_sequence_expand(uint32_t channels_mask,
+int adc_ytm32_sequence_expand(uint64_t channels_mask,
 				      const uint8_t *order,
 				      uint8_t order_count,
 				      uint8_t max_slots,
@@ -19,7 +19,7 @@ int adc_ytm32_sequence_expand(uint32_t channels_mask,
 				      uint8_t *channel_count_out,
 				      uint8_t *max_sample_time_out)
 {
-	uint32_t seen = 0U;
+	uint64_t seen = 0U;
 	uint8_t count = 0U;
 	uint8_t max_sample_time = 0U;
 
@@ -52,15 +52,14 @@ int adc_ytm32_sequence_expand(uint32_t channels_mask,
 	} else {
 		for (uint8_t index = 0U; index < order_count; index++) {
 			uint8_t channel = order[index];
-			uint32_t channel_bit;
+			uint64_t channel_bit;
 
 			if (channel >= YTM32_ADC_CHANNEL_MASK_BITS ||
 			    channel >= sample_time_count) {
 				return -EINVAL;
 			}
 			channel_bit = YTM32_ADC_CHANNEL_BIT(channel);
-			if ((channels_mask & channel_bit) == 0U ||
-			    (seen & channel_bit) != 0U) {
+			if ((channels_mask & channel_bit) == 0U) {
 				return -EINVAL;
 			}
 
@@ -103,6 +102,31 @@ int adc_ytm32_validate_timing(uint32_t fadc_hz, uint8_t sample_time,
 	}
 
 	return 0;
+}
+
+int adc_ytm32_dma_trigger_plan(
+		enum adc_ytm32_dma_sequence_mode sequence_mode,
+		bool hardware_trigger, uint8_t channel_count, uint16_t depth,
+		uint32_t *triggers_per_callback)
+{
+	if (channel_count == 0U || depth == 0U ||
+	    triggers_per_callback == NULL) {
+		return -EINVAL;
+	}
+
+	switch (sequence_mode) {
+	case ADC_YTM32_DMA_SEQUENCE_FULL:
+		*triggers_per_callback = depth;
+		return 0;
+	case ADC_YTM32_DMA_SEQUENCE_STEP:
+		if (!hardware_trigger) {
+			return -ENOTSUP;
+		}
+		*triggers_per_callback = (uint32_t)channel_count * depth;
+		return 0;
+	default:
+		return -EINVAL;
+	}
 }
 
 uint32_t adc_ytm32_ticks_to_ns(uint32_t ticks, uint32_t fadc_hz)

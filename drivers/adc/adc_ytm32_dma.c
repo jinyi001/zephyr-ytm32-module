@@ -226,6 +226,10 @@ int adc_ytm32_dma_start(const struct device *dev,
 	    (cfg->cb == NULL && cfg->zl_cb == NULL)) {
 		return -EINVAL;
 	}
+	if ((cfg->sequence_order_count != 0U && cfg->sequence_order == NULL) ||
+	    cfg->sequence_order_count > ADC_CHSEL_COUNT) {
+		return -EINVAL;
+	}
 	if (st->dma_active) {
 		return -EBUSY;
 	}
@@ -239,13 +243,37 @@ int adc_ytm32_dma_start(const struct device *dev,
 
 	uint8_t ch_count;
 	uint8_t max_smp;
+	uint32_t triggers_per_callback;
 	adc_inputchannel_t sequence_channels[ADC_CHSEL_COUNT];
 
-	ret = adc_ytm32_sequence_from_config(config, cfg->channels,
-						     sequence_channels, st->sample_time,
-						     &ch_count, &max_smp);
+	if (cfg->sequence_order_count == 0U) {
+		ret = adc_ytm32_sequence_from_config(
+			config, cfg->channels, sequence_channels, st->sample_time,
+			&ch_count, &max_smp);
+	} else {
+		uint8_t sequence[ADC_CHSEL_COUNT] = {0};
+
+		ret = adc_ytm32_sequence_expand(
+			cfg->channels, cfg->sequence_order,
+			cfg->sequence_order_count, ADC_CHSEL_COUNT, sequence,
+			st->sample_time, YTM32_ADC_MAX_CHANS, &ch_count,
+			&max_smp);
+		if (ret == 0) {
+			for (uint8_t index = 0U; index < ch_count; index++) {
+				sequence_channels[index] =
+					(adc_inputchannel_t)sequence[index];
+			}
+		}
+	}
 	if (ret < 0) {
 		LOG_ERR("invalid ADC sequence order: %d", ret);
+		return ret;
+	}
+	ret = adc_ytm32_dma_trigger_plan(cfg->sequence_mode, hw_trig,
+					 ch_count, cfg->depth,
+					 &triggers_per_callback);
+	if (ret < 0) {
+		LOG_ERR("invalid ADC DMA sequence mode: %d", ret);
 		return ret;
 	}
 	ret = adc_ytm32_validate_timing(st->adc_clock_hz, max_smp,
@@ -272,7 +300,9 @@ int adc_ytm32_dma_start(const struct device *dev,
 		adc_ytm32_select_hw_trigger_input(dev);
 	}
 
-	/* 2. Configure DMA: each ADC DMA request drains one full channel sequence;
+	/* 2. Configure DMA: in FULL mode the FIFO reaches its watermark after one
+	 * trigger; in STEP mode it reaches the same watermark after ch_count
+	 * triggers.  Either way each DMA request drains one complete sequence and
 	 * after 'depth' sequences the user buffer is full.
 	 */
 	uintptr_t fifo_addr = (uintptr_t)&((ADC_Type *)config->base)->FIFO;
@@ -311,8 +341,8 @@ int adc_ytm32_dma_start(const struct device *dev,
 	}
 
 	/* 3. Configure ADC: DMA enabled, no interrupts.
-	 * - hardware mode: external trigger drives one sequence per eTMR period
-	 *   (LOOP = one sequence per trigger).
+	 * - hardware FULL mode: one full sequence per eTMR trigger.
+	 * - hardware STEP mode: one sequence slot per eTMR trigger.
 	 * - software mode: free-running continuous conversion self-clocks the
 	 *   sequence back-to-back.
 	 */
@@ -322,8 +352,10 @@ int adc_ytm32_dma_start(const struct device *dev,
 	}
 
 	conv.sequenceConfig.totalChannels     = ch_count;
-	conv.sequenceConfig.sequenceMode      = hw_trig ? ADC_CONV_LOOP
-							: ADC_CONV_CONTINUOUS;
+	conv.sequenceConfig.sequenceMode =
+		cfg->sequence_mode == ADC_YTM32_DMA_SEQUENCE_STEP ?
+		ADC_CONV_STEP :
+		(hw_trig ? ADC_CONV_LOOP : ADC_CONV_CONTINUOUS);
 	conv.sequenceConfig.sequenceIntEnable = false;
 	conv.sequenceConfig.ovrunIntEnable    = false;
 	conv.sampleTime   = max_smp;
@@ -342,6 +374,7 @@ int adc_ytm32_dma_start(const struct device *dev,
 	conv.dmaEnable    = true;
 	/* DMA request fires once one full channel sequence is in the FIFO. */
 	conv.dmaWaterMark = ch_count - 1U;
+	ARG_UNUSED(triggers_per_callback);
 
 	ADC_DRV_ConfigConverter(config->instance, &conv);
 

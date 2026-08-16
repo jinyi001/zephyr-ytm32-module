@@ -69,6 +69,9 @@ struct pwm_ytm32_data {
 	uint32_t period_cycles; /* last period passed to set_cycles, in counter ticks */
 	etmr_state_t etmr_state;
 	atomic_t safe_state;
+	/* Packed CHMASK state for the commanded 0%/100% endpoints.  This is
+	 * distinct from safe_state: safe always forces all six outputs low. */
+	atomic_t endpoint_chmask;
 	atomic_t counter_running;
 	atomic_t phase_config_error;
 	atomic_t fault_latched;
@@ -190,9 +193,9 @@ int pwm_ytm32_etmr_force_safe(const struct device *dev)
 		pwm_ytm32_etmr_complementary_channel_mask(comp_mask);
 	int ret;
 
+	atomic_set(&data->safe_state, 1);
 	ret = pwm_ytm32_etmr_mask_outputs(dev, physical_mask, 0U);
 	/* Keep the software state fail-safe even if the HAL write is rejected. */
-	atomic_set(&data->safe_state, 1);
 	return ret;
 }
 
@@ -211,6 +214,7 @@ int pwm_ytm32_etmr_release_safe(const struct device *dev)
 {
 	const struct pwm_ytm32_config *cfg = dev->config;
 	struct pwm_ytm32_data *data = dev->data;
+	struct pwm_ytm32_etmr_output_mask endpoint_mask;
 	int ret;
 
 	if (atomic_get(&data->fault_latched) != 0) {
@@ -226,8 +230,15 @@ int pwm_ytm32_etmr_release_safe(const struct device *dev)
 		return -EAGAIN;
 	}
 
-	/* mask_enable == 0 releases the output mask; duty shadows remain intact. */
-	ret = pwm_ytm32_etmr_mask_outputs(dev, 0U, 0U);
+	/*
+	 * Restore the commanded endpoint state instead of blindly clearing all
+	 * masks.  A complementary pair at 0% contains a physical 100% output,
+	 * which YTM32B1MD1 eTMR cannot generate from VAL0/VAL1 (E503001).
+	 */
+	endpoint_mask = pwm_ytm32_etmr_output_mask_unpack(
+		(uint32_t)atomic_get(&data->endpoint_chmask));
+	ret = pwm_ytm32_etmr_mask_outputs(dev, endpoint_mask.enable,
+					 endpoint_mask.value);
 	if (ret == 0) {
 		atomic_set(&data->safe_state, 0);
 	}
@@ -480,6 +491,7 @@ static int pwm_ytm32_set_cycles(const struct device *dev, uint32_t channel,
 	const struct pwm_ytm32_config *cfg = dev->config;
 	struct pwm_ytm32_data *data = dev->data;
 	bool center = channel_is_comp(cfg, channel);
+	struct pwm_ytm32_etmr_output_mask endpoint_mask;
 	uint32_t duty_q15;
 	uint32_t sdk_period;
 
@@ -535,6 +547,29 @@ static int pwm_ytm32_set_cycles(const struct device *dev, uint32_t channel,
 	}
 
 	eTMR_DRV_UpdatePwmChannel(cfg->instance, channel, duty_q15, 0U);
+
+	if (center) {
+		endpoint_mask = pwm_ytm32_etmr_output_mask_unpack(
+			(uint32_t)atomic_get(&data->endpoint_chmask));
+		pwm_ytm32_etmr_endpoint_mask_update(&endpoint_mask,
+						     (uint8_t)channel,
+						     (uint16_t)duty_q15);
+		atomic_set(&data->endpoint_chmask,
+			   (atomic_val_t)pwm_ytm32_etmr_output_mask_pack(
+				   &endpoint_mask));
+		if (atomic_get(&data->safe_state) == 0) {
+			g_etmrBase[cfg->instance]->CHMASK =
+				pwm_ytm32_etmr_output_mask_pack(&endpoint_mask);
+			/* A zero-latency safe request may preempt after the check
+			 * above.  Never let this update's later software sync restore
+			 * an endpoint mask over the all-low safety shadow. */
+			if (atomic_get(&data->safe_state) != 0) {
+				g_etmrBase[cfg->instance]->CHMASK =
+					pwm_ytm32_etmr_complementary_channel_mask(
+						phase_complementary_mask(cfg));
+			}
+		}
+	}
 
 	/* Commit all pending shadow register updates atomically */
 	eTMR_DRV_SyncWithSoftTrigger(cfg->instance);
@@ -664,6 +699,7 @@ void pwm_ytm32_update_3phase_isr(const struct device *dev,
 	const struct pwm_ytm32_config *cfg = dev->config;
 	struct pwm_ytm32_data *data = dev->data;
 	eTMR_Type *base = g_etmrBase[cfg->instance];
+	struct pwm_ytm32_etmr_output_mask endpoint_mask = {0};
 	uint32_t period = data->etmr_state.etmrPeriod;
 
 	if (!pwm_ytm32_etmr_phase_config_valid(dev) || period == 0U) {
@@ -681,6 +717,32 @@ void pwm_ytm32_update_3phase_isr(const struct device *dev,
 					 db_q15);
 	pwm_ytm32_etmr_write_center_duty(base, cfg->phase_channels[2], period,
 					 dc_q15);
+
+	/*
+	 * YTM32B1MD1 erratum E503001: a physical 100% PWM output cannot be
+	 * generated with VAL0/VAL1.  Every 0% complementary pair contains such
+	 * a 100% odd output, so commit endpoint CHMASK state with the three edge
+	 * updates.  While software-safe remains asserted, only remember the
+	 * command; release_safe() will restore it after the first complete frame.
+	 */
+	pwm_ytm32_etmr_endpoint_mask_update(&endpoint_mask,
+					     cfg->phase_channels[0], da_q15);
+	pwm_ytm32_etmr_endpoint_mask_update(&endpoint_mask,
+					     cfg->phase_channels[1], db_q15);
+	pwm_ytm32_etmr_endpoint_mask_update(&endpoint_mask,
+					     cfg->phase_channels[2], dc_q15);
+	atomic_set(&data->endpoint_chmask,
+		   (atomic_val_t)pwm_ytm32_etmr_output_mask_pack(&endpoint_mask));
+	if (atomic_get(&data->safe_state) == 0) {
+		base->CHMASK = pwm_ytm32_etmr_output_mask_pack(&endpoint_mask);
+		/* Preserve a concurrent all-low safety request if it preempted
+		 * this overflow update between the first state check and write. */
+		if (atomic_get(&data->safe_state) != 0) {
+			base->CHMASK =
+				pwm_ytm32_etmr_complementary_channel_mask(
+					phase_complementary_mask(cfg));
+		}
+	}
 	eTMR_DRV_SyncWithSoftTrigger(cfg->instance);
 }
 
@@ -988,6 +1050,18 @@ static int pwm_ytm32_init(const struct device *dev)
 		LOG_ERR("eTMR_DRV_InitPwm failed (%d)", s);
 		return -EIO;
 	}
+
+	/* InitPwm starts every configured pair at 0%.  Preserve the corresponding
+	 * endpoint state beneath the all-low software safety mask. */
+	struct pwm_ytm32_etmr_output_mask initial_endpoint_mask = {0};
+
+	for (uint8_t phase = 0U; phase < PWM_YTM32_ETMR_PHASE_COUNT; phase++) {
+		pwm_ytm32_etmr_endpoint_mask_update(&initial_endpoint_mask,
+						     cfg->phase_channels[phase], 0U);
+	}
+	atomic_set(&data->endpoint_chmask,
+		   (atomic_val_t)pwm_ytm32_etmr_output_mask_pack(
+			   &initial_endpoint_mask));
 
 	/* InitPwm configures channel initial values but does not establish the
 	 * software safety invariant.  Apply the output mask before any optional

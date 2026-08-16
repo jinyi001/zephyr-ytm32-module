@@ -73,6 +73,40 @@ ZTEST(etmr_pwm_map, test_center_aligned_edges_have_safe_endpoints)
 	zassert_equal(val1, 5999U, "full duty VAL1");
 }
 
+ZTEST(etmr_pwm_map, test_erratum_endpoint_masks_for_complementary_pairs)
+{
+	const uint8_t phase_channels[PWM_YTM32_ETMR_PHASE_COUNT] = {6U, 2U, 4U};
+	struct pwm_ytm32_etmr_output_mask mask = {0};
+	struct pwm_ytm32_etmr_output_mask unpacked;
+	uint32_t packed;
+
+	for (size_t phase = 0U; phase < PWM_YTM32_ETMR_PHASE_COUNT; phase++) {
+		pwm_ytm32_etmr_endpoint_mask_update(&mask,
+						     phase_channels[phase], 0U);
+	}
+	zassert_equal(mask.enable, 0xFCU, "all-zero masks all phase outputs");
+	zassert_equal(mask.value, 0x4440U,
+		      "all-zero forces even low and complementary odd high");
+
+	for (size_t phase = 0U; phase < PWM_YTM32_ETMR_PHASE_COUNT; phase++) {
+		pwm_ytm32_etmr_endpoint_mask_update(
+			&mask, phase_channels[phase], PWM_YTM32_ETMR_MAX_DUTY_Q15);
+	}
+	zassert_equal(mask.enable, 0xFCU, "all-full masks all phase outputs");
+	zassert_equal(mask.value, 0x1110U,
+		      "all-full forces even high and complementary odd low");
+
+	pwm_ytm32_etmr_endpoint_mask_update(&mask, 4U, 0x4000U);
+	zassert_equal(mask.enable, 0xCCU, "interior duty releases its pair");
+	zassert_equal(mask.value, 0x1010U, "interior duty clears pair values");
+
+	packed = pwm_ytm32_etmr_output_mask_pack(&mask);
+	zassert_equal(packed, 0x101000CCU, "packed CHMASK register value");
+	unpacked = pwm_ytm32_etmr_output_mask_unpack(packed);
+	zassert_equal(unpacked.enable, mask.enable, "unpacked mask enables");
+	zassert_equal(unpacked.value, mask.value, "unpacked mask values");
+}
+
 ZTEST(etmr_pwm_map, test_fault_polarity_maps_raw_inputs)
 {
 	/* V3 FLT3 is active-low: high is idle, low is an asserted fault. */

@@ -21,6 +21,11 @@ struct pwm_ytm32_etmr_phase_map {
 	uint8_t channel_mask;
 };
 
+struct pwm_ytm32_etmr_output_mask {
+	uint8_t enable;
+	uint16_t value;
+};
+
 /*
  * Derive the complementary-pair mask from the three phase channels.  The
  * phase list is the single source of truth: each even phase channel owns
@@ -93,6 +98,61 @@ static inline uint8_t pwm_ytm32_etmr_complementary_channel_mask(
 }
 
 /*
+ * Apply the E503001 endpoint workaround for one complementary pair.
+ *
+ * CHMASK has one enable bit and one two-bit forced value per physical
+ * channel.  At 0% the even/high-side output must stay low while its
+ * complementary odd/low-side output stays high; 100% is the inverse.
+ * Interior duties use the normal compare outputs.  Masking both outputs at
+ * an endpoint also avoids relying on a VAL0/VAL1 value equal to INIT, which
+ * is affected by E503012 during the initial counter cycle.
+ */
+static inline void pwm_ytm32_etmr_endpoint_mask_update(
+	struct pwm_ytm32_etmr_output_mask *mask, uint8_t even_channel,
+	uint16_t duty_q15)
+{
+	uint8_t pair_enable;
+	uint16_t pair_value_mask;
+
+	if (mask == NULL || even_channel >= PWM_YTM32_ETMR_CHANNEL_COUNT ||
+	    (even_channel & 1U) != 0U) {
+		return;
+	}
+
+	pair_enable = (uint8_t)(3U << even_channel);
+	pair_value_mask = (uint16_t)(0xFU << (2U * even_channel));
+	mask->enable &= (uint8_t)~pair_enable;
+	mask->value &= (uint16_t)~pair_value_mask;
+
+	if (duty_q15 == 0U) {
+		mask->enable |= pair_enable;
+		mask->value |= (uint16_t)(1U << (2U * (even_channel + 1U)));
+	} else if (duty_q15 >= PWM_YTM32_ETMR_MAX_DUTY_Q15) {
+		mask->enable |= pair_enable;
+		mask->value |= (uint16_t)(1U << (2U * even_channel));
+	}
+}
+
+static inline uint32_t pwm_ytm32_etmr_output_mask_pack(
+	const struct pwm_ytm32_etmr_output_mask *mask)
+{
+	if (mask == NULL) {
+		return 0U;
+	}
+
+	return (uint32_t)mask->enable | ((uint32_t)mask->value << 16U);
+}
+
+static inline struct pwm_ytm32_etmr_output_mask
+pwm_ytm32_etmr_output_mask_unpack(uint32_t packed)
+{
+	return (struct pwm_ytm32_etmr_output_mask) {
+		.enable = (uint8_t)packed,
+		.value = (uint16_t)(packed >> 16U),
+	};
+}
+
+/*
  * Convert raw digital fault-input levels to active fault inputs.  A raw bit
  * of one means the pin is high; active-low inputs therefore assert when the
  * corresponding raw bit is zero.  Keeping this conversion pure makes the
@@ -121,8 +181,8 @@ static inline uint8_t pwm_ytm32_etmr_fault_status_active_mask(
 
 /*
  * Calculate center-aligned VAL0/VAL1 edges for the MD1 edge convention.
- * The explicit endpoints are intentional: a 0% duty cycle is not a safe
- * output state for an inverted complementary channel.
+ * Endpoint edge values are retained as shadow-state placeholders; physical
+ * endpoint levels are generated with CHMASK by the E503001 workaround above.
  */
 static inline void pwm_ytm32_etmr_center_edges(uint32_t period,
 						 uint16_t duty_q15,
